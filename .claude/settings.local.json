@@ -10,7 +10,10 @@
       "Bash(cp -r temp-vue/public .)",
       "Bash(npm install *)",
       "Bash(npm ls *)",
-      "Bash(timeout 15 npm run dev)"
+      "Bash(timeout 15 npm run dev)",
+      "Bash(npx vue-tsc *)",
+      "Bash(npx vite *)",
+      "Bash(npm run *)"
     ]
   }
 }

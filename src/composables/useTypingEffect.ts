@@ -20,7 +20,6 @@ export function useTypingEffect(
         delay: delay / 1000,
         ease: 'none',
         onUpdate() {
-          // @ts-expect-error gsap context
           const idx = Math.floor(this.targets()[0].progress)
           displayText.value = text.slice(0, idx)
         },

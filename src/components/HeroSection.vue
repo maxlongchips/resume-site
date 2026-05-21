@@ -40,7 +40,6 @@ onMounted(() => {
         duration: (text.length * 40) / 1000,
         ease: 'none',
         onUpdate() {
-          // @ts-expect-error gsap context
           const idx = Math.floor(this.targets()[0].progress)
           sloganText.value = text.slice(0, idx)
         },
