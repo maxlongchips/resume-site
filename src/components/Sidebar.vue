@@ -199,4 +199,44 @@ defineEmits<{
     transform: scale(0.8);
   }
 }
+
+@media (max-width: 1024px) {
+  .sidebar {
+    width: 60px;
+  }
+
+  .sidebar .avatar-ring,
+  .sidebar .sidebar-name,
+  .sidebar .sidebar-title,
+  .sidebar nav .nav-label,
+  .sidebar nav .nav-item span:not(.nav-num),
+  .sidebar .status-dot + span {
+    display: none;
+  }
+
+  .sidebar nav .nav-item {
+    padding: 10px;
+    justify-content: center;
+  }
+
+  .sidebar nav .nav-num {
+    width: auto;
+  }
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    left: -300px;
+    top: 0;
+    bottom: 0;
+    z-index: 50;
+    width: 300px;
+    transition: left 0.3s;
+  }
+
+  .sidebar.open {
+    left: 0;
+  }
+}
 </style>

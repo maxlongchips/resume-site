@@ -105,4 +105,24 @@ onMounted(() => {
   width: 1px;
   background: linear-gradient(180deg, transparent, var(--border) 10%, var(--border) 90%, transparent);
 }
+
+@media (max-width: 1024px) {
+  .content-area {
+    padding: 60px 40px;
+  }
+
+  .content-area::before {
+    left: 20px;
+  }
+}
+
+@media (max-width: 768px) {
+  .content-area {
+    padding: 40px 20px;
+  }
+
+  .content-area::before {
+    display: none;
+  }
+}
 </style>
