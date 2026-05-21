@@ -1,0 +1,81 @@
+<h2>页面布局结构</h2>
+<p class="subtitle">选择你偏好的整体布局方式</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: #0a0a0a; height: 220px; display: flex; flex-direction: column; padding: 20px; gap: 12px; font-family: monospace; font-size: 10px;">
+      <div style="border: 1px solid rgba(255,255,255,0.15); padding: 15px; display: flex; align-items: center; justify-content: center; height: 60px;">
+        <span style="color: rgba(255,255,255,0.5);">$ whoami</span>
+      </div>
+      <div style="border: 1px solid rgba(255,255,255,0.15); padding: 15px; height: 40px;">
+        <span style="color: rgba(255,255,255,0.3);">$ cat about.md</span>
+      </div>
+      <div style="border: 1px solid rgba(255,255,255,0.15); padding: 15px; height: 40px;">
+        <span style="color: rgba(255,255,255,0.3);">$ ls skills/</span>
+      </div>
+      <div style="border: 1px solid rgba(255,255,255,0.15); padding: 15px; height: 40px;">
+        <span style="color: rgba(255,255,255,0.3);">$ cat contact.json</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. 单页长滚动</h3>
+      <p>一个页面，各板块依次排列，滚动切换。经典简历网站布局，每个区块用 Terminal 命令风格过渡。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: #0a0a0a; height: 220px; display: flex; font-family: monospace; font-size: 10px; gap: 2px; padding: 20px;">
+      <div style="width: 120px; border-right: 1px solid rgba(255,255,255,0.1); padding: 10px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="color: rgba(255,255,255,0.6); padding: 4px 6px; background: rgba(255,255,255,0.08);">~/home</div>
+        <div style="color: rgba(255,255,255,0.3); padding: 4px 6px;">~/about</div>
+        <div style="color: rgba(255,255,255,0.3); padding: 4px 6px;">~/skills</div>
+        <div style="color: rgba(255,255,255,0.3); padding: 4px 6px;">~/work</div>
+        <div style="color: rgba(255,255,255,0.3); padding: 4px 6px;">~/contact</div>
+      </div>
+      <div style="flex: 1; padding: 10px; border: 1px solid rgba(255,255,255,0.05);">
+        <div style="color: rgba(255,255,255,0.4);">$ cat hero.md</div>
+        <div style="margin-top: 8px; color: rgba(255,255,255,0.2); font-size: 8px; line-height: 1.6;">
+          # Hello World<br>
+          I'm a developer<br>
+          who builds things
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. 左侧导航 + 右侧内容</h3>
+      <p>左侧 Terminal 风格文件树导航，右侧主内容区。类似 IDE 布局，适合技术感展示。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: #0a0a0a; height: 220px; display: flex; flex-direction: column; font-family: monospace; font-size: 10px; padding: 20px;">
+      <div style="display: flex; border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 10px;">
+        <div style="padding: 6px 12px; color: rgba(255,255,255,0.6); border-bottom: 2px solid #fff;">Tab 1</div>
+        <div style="padding: 6px 12px; color: rgba(255,255,255,0.3);">Tab 2</div>
+        <div style="padding: 6px 12px; color: rgba(255,255,255,0.3);">Tab 3</div>
+      </div>
+      <div style="flex: 1; display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <div style="border: 1px solid rgba(255,255,255,0.1); padding: 8px;">
+          <div style="color: rgba(255,255,255,0.4);">project_01/</div>
+          <div style="margin-top: 4px; color: rgba(255,255,255,0.2); font-size: 8px;">description here</div>
+        </div>
+        <div style="border: 1px solid rgba(255,255,255,0.1); padding: 8px;">
+          <div style="color: rgba(255,255,255,0.4);">project_02/</div>
+          <div style="margin-top: 4px; color: rgba(255,255,255,0.2); font-size: 8px;">description here</div>
+        </div>
+        <div style="border: 1px solid rgba(255,255,255,0.1); padding: 8px;">
+          <div style="color: rgba(255,255,255,0.4);">project_03/</div>
+          <div style="margin-top: 4px; color: rgba(255,255,255,0.2); font-size: 8px;">description here</div>
+        </div>
+        <div style="border: 1px solid rgba(255,255,255,0.1); padding: 8px;">
+          <div style="color: rgba(255,255,255,0.4);">project_04/</div>
+          <div style="margin-top: 4px; color: rgba(255,255,255,0.2); font-size: 8px;">description here</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. 多标签页切换</h3>
+      <p>模拟 Terminal 标签页，点击切换不同板块。每个板块独立展示，有"打开文件"的仪式感。</p>
+    </div>
+  </div>
+</div>

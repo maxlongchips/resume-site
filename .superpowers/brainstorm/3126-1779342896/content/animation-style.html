@@ -1,0 +1,52 @@
+<h2>动效与交互风格</h2>
+<p class="subtitle">选择你偏好的动效风格，这决定了网站的"手感"</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: #0a0a0a; height: 180px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;">
+      <div style="color: #fff; font-family: monospace; font-size: 13px;">
+        <span style="opacity: 0.3;">$</span> <span id="typing-a" style="border-right: 2px solid #fff; animation: blink 1s infinite;">loading_portfolio</span>
+      </div>
+      <style>@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }</style>
+      <div style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: rgba(255,255,255,0.3); font-size: 10px; font-family: monospace; letter-spacing: 2px;">SCROLL DOWN ↓</div>
+    </div>
+    <div class="card-body">
+      <h3>A. Terminal 交互</h3>
+      <p>打字机效果、命令行风格的入场动画、光标闪烁、逐字显现。强交互感。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: #0a0a0a; height: 180px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;">
+      <div style="color: #fff; font-size: 28px; font-weight: 100; letter-spacing: 12px; opacity: 0; animation: fadeSlide 2s ease forwards;">HELLO</div>
+      <style>@keyframes fadeSlide { 0%{opacity:0;transform:translateY(30px)} 100%{opacity:1;transform:translateY(0)} }</style>
+      <div style="position: absolute; bottom: 0; left: 0; right: 0; height: 2px; background: linear-gradient(90deg, transparent, #fff, transparent); animation: scanLine 3s linear infinite;"></div>
+      <style>@keyframes scanLine { 0%{transform:translateX(-100%)} 100%{transform:translateX(100%)} }</style>
+    </div>
+    <div class="card-body">
+      <h3>B. 丝滑渐显</h3>
+      <p>元素随滚动渐显、平滑的淡入淡出、柔和的位移。克制但精致，类似 Linear 官网。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: #0a0a0a; height: 180px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;">
+      <div style="display: grid; grid-template-columns: repeat(4,1fr); gap: 4px;">
+        <div style="width: 20px; height: 20px; border: 1px solid rgba(255,255,255,0.1); animation: gridPulse 2s ease infinite 0s;"></div>
+        <div style="width: 20px; height: 20px; border: 1px solid rgba(255,255,255,0.1); animation: gridPulse 2s ease infinite 0.2s;"></div>
+        <div style="width: 20px; height: 20px; border: 1px solid rgba(255,255,255,0.1); animation: gridPulse 2s ease infinite 0.4s;"></div>
+        <div style="width: 20px; height: 20px; border: 1px solid rgba(255,255,255,0.1); animation: gridPulse 2s ease infinite 0.6s;"></div>
+        <div style="width: 20px; height: 20px; border: 1px solid rgba(255,255,255,0.1); animation: gridPulse 2s ease infinite 0.3s;"></div>
+        <div style="width: 20px; height: 20px; border: 1px solid rgba(255,255,255,0.1); animation: gridPulse 2s ease infinite 0.5s;"></div>
+        <div style="width: 20px; height: 20px; border: 1px solid rgba(255,255,255,0.1); animation: gridPulse 2s ease infinite 0.7s;"></div>
+        <div style="width: 20px; height: 20px; border: 1px solid rgba(255,255,255,0.1); animation: gridPulse 2s ease infinite 0.9s;"></div>
+      </div>
+      <style>@keyframes gridPulse { 0%,100%{border-color:rgba(255,255,255,0.1)} 50%{border-color:rgba(255,255,255,0.6)} }</style>
+      <div style="position: absolute; bottom: 15px; color: rgba(255,255,255,0.2); font-size: 9px; font-family: monospace; letter-spacing: 3px;">DATA VISUALIZATION</div>
+    </div>
+    <div class="card-body">
+      <h3>C. 数据驱动</h3>
+      <p>数字跳动、进度条动画、矩阵排列、代码片段高亮。用数据和代码讲故事。</p>
+    </div>
+  </div>
+</div>

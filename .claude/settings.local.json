@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bash *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git *)",
+      "Bash(npm create *)",
+      "Bash(cp -r temp-vue/src .)",
+      "Bash(cp -r temp-vue/public .)",
+      "Bash(npm install *)"
+    ]
+  }
+}

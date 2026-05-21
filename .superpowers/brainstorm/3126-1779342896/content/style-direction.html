@@ -1,0 +1,48 @@
+<h2>暗黑科技感 — 风格方向确认</h2>
+<p class="subtitle">以下是三种不同"暗黑科技感"的诠释，点击选择你最倾向的方向</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #16213e 100%); height: 200px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;">
+      <div style="position: absolute; top: 20px; left: 20px; width: 60px; height: 2px; background: #00f0ff;"></div>
+      <div style="position: absolute; top: 20px; left: 20px; width: 2px; height: 60px; background: #00f0ff;"></div>
+      <div style="color: #00f0ff; font-size: 14px; font-family: monospace; letter-spacing: 4px; text-transform: uppercase;">Cyberpunk</div>
+      <div style="position: absolute; bottom: 20px; right: 20px; width: 40px; height: 40px; border: 1px solid rgba(0,240,255,0.3); transform: rotate(45deg);"></div>
+      <div style="position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,240,255,0.03) 2px, rgba(0,240,255,0.03) 4px); pointer-events: none;"></div>
+    </div>
+    <div class="card-body">
+      <h3>A. 赛博朋克</h3>
+      <p>霓虹蓝/青色为主色调，扫描线效果，几何线条装饰，强烈的未来感。字体使用等宽体。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: linear-gradient(180deg, #0d0d0d 0%, #1a0a2e 100%); height: 200px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;">
+      <div style="position: absolute; width: 120px; height: 120px; border-radius: 50%; background: radial-gradient(circle, rgba(139,92,246,0.15) 0%, transparent 70%); filter: blur(30px);"></div>
+      <div style="position: absolute; width: 80px; height: 80px; border-radius: 50%; background: radial-gradient(circle, rgba(236,72,153,0.1) 0%, transparent 70%); top: 30px; right: 40px; filter: blur(20px);"></div>
+      <div style="color: #e2e8f0; font-size: 15px; font-family: 'Inter', sans-serif; font-weight: 200; letter-spacing: 8px; text-transform: uppercase;">Elegant</div>
+      <div style="position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); width: 40px; height: 1px; background: linear-gradient(90deg, transparent, rgba(139,92,246,0.5), transparent);"></div>
+    </div>
+    <div class="card-body">
+      <h3>B. 暗黑优雅</h3>
+      <p>深紫/玫红渐变光晕，极细字体，大量留白，柔和的光效。克制而高级的质感。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="background: #0a0a0a; height: 200px; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden;">
+      <div style="position: absolute; top: 30px; left: 30px; right: 30px; bottom: 30px; border: 1px solid rgba(255,255,255,0.08);"></div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <div style="width: 30px; height: 1px; background: rgba(255,255,255,0.3);"></div>
+        <div style="color: #ffffff; font-size: 13px; font-family: 'SF Mono', 'Fira Code', monospace; letter-spacing: 3px;">MINIMAL</div>
+        <div style="width: 30px; height: 1px; background: rgba(255,255,255,0.3);"></div>
+      </div>
+      <div style="position: absolute; top: 50%; left: 30px; width: 4px; height: 4px; background: #fff; border-radius: 50; opacity: 0.5;"></div>
+      <div style="position: absolute; top: 50%; right: 30px; width: 4px; height: 4px; background: #fff; border-radius: 50%; opacity: 0.5;"></div>
+    </div>
+    <div class="card-body">
+      <h3>C. 纯粹极客</h3>
+      <p>纯黑白配色，无彩色，极致的网格对齐，Terminal 风格元素。像一份精美的代码。</p>
+    </div>
+  </div>
+</div>
