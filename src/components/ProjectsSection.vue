@@ -15,102 +15,277 @@ function formatIndex(i: number): string {
 
 <template>
   <section ref="sectionRef" class="mb-25">
-    <SectionHeader command="ls projects/" section-num="03" />
+    <SectionHeader command="ls projects/" section-num="05" />
 
-    <div class="flex flex-col gap-5" data-reveal>
+    <div class="flex flex-col gap-6" data-reveal>
       <div
         v-for="(project, i) in projects"
         :key="project.name"
-        class="project-row"
+        class="project-card"
       >
-        <div class="project-idx">{{ formatIndex(i) }}</div>
-        <div class="project-info">
-          <div class="text-base font-medium tracking-wide mb-1.5">
-            {{ project.name }}
+        <!-- Project header -->
+        <div class="project-header">
+          <div class="project-idx">{{ formatIndex(i) }}</div>
+          <div class="project-title-area">
+            <div class="project-name">{{ project.name }}</div>
+            <div class="project-meta">
+              <span class="project-type">{{ project.type }}</span>
+              <span class="project-period">{{ project.period }}</span>
+              <span class="project-role">{{ project.role }}</span>
+            </div>
           </div>
-          <p class="text-[13px] text-[var(--text-dim)] leading-relaxed mb-2.5">
-            {{ project.description }}
-          </p>
-          <div class="flex gap-1.5 flex-wrap">
+        </div>
+
+        <!-- Project background -->
+        <div class="project-section">
+          <div class="section-label">项目背景</div>
+          <p class="section-content">{{ project.background }}</p>
+        </div>
+
+        <!-- Project description -->
+        <div class="project-section">
+          <div class="section-label">项目描述</div>
+          <p class="section-content">{{ project.description }}</p>
+        </div>
+
+        <!-- Responsibilities -->
+        <div class="project-section">
+          <div class="section-label">个人职责</div>
+          <ul class="responsibilities-list">
+            <li
+              v-for="(resp, idx) in project.responsibilities"
+              :key="idx"
+              class="responsibility-item"
+            >
+              <span class="bullet">▸</span>
+              <span>{{ resp }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Achievements -->
+        <div class="project-section">
+          <div class="section-label">项目成果</div>
+          <ul class="achievements-list">
+            <li
+              v-for="(achievement, idx) in project.achievements"
+              :key="idx"
+              class="achievement-item"
+            >
+              <span class="bullet success">✓</span>
+              <span>{{ achievement }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Tech stack -->
+        <div class="project-footer">
+          <div class="tech-tags">
             <span
               v-for="tag in project.tags"
               :key="tag"
-              class="project-tag"
+              class="tech-tag"
             >
               {{ tag }}
             </span>
           </div>
         </div>
-        <div class="project-arrow">→</div>
       </div>
     </div>
   </section>
 </template>
 
 <style scoped>
-.project-row {
-  display: grid;
-  grid-template-columns: 120px 1fr auto;
-  align-items: center;
-  gap: 30px;
-  padding: 28px 30px;
+.project-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  padding: 32px;
   position: relative;
+  transition: all 0.3s;
+  overflow: hidden;
 }
 
-.project-row::before {
+.project-card::before {
   content: '';
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
-  width: 0;
+  width: 3px;
   background: var(--accent);
-  transition: width 0.3s;
+  opacity: 0;
+  transition: opacity 0.3s;
 }
 
-.project-row:hover {
+.project-card:hover {
   border-color: var(--border-hover);
   transform: translateX(4px);
 }
 
-.project-row:hover::before {
-  width: 3px;
+.project-card:hover::before {
+  opacity: 1;
+}
+
+/* Header */
+.project-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 24px;
 }
 
 .project-idx {
   font-family: var(--font-serif);
-  font-size: 36px;
+  font-size: 42px;
   color: var(--accent);
   opacity: 0.3;
-  transition: opacity 0.3s;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
-.project-row:hover .project-idx {
+.project-card:hover .project-idx {
   opacity: 0.6;
 }
 
-.project-tag {
+.project-title-area {
+  flex: 1;
+}
+
+.project-name {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+  letter-spacing: 0.02em;
+}
+
+.project-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.project-type {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  padding: 2px 10px;
+  border: 1px solid var(--accent);
+  letter-spacing: 0.05em;
+}
+
+.project-period {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.project-role {
+  font-size: 13px;
+  color: var(--text-dim);
+  font-weight: 300;
+}
+
+/* Sections */
+.project-section {
+  margin-bottom: 20px;
+}
+
+.section-label {
   font-family: var(--font-mono);
   font-size: 10px;
+  color: var(--accent);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.section-content {
+  font-size: 14px;
+  color: var(--text-dim);
+  line-height: 1.8;
+  font-weight: 300;
+}
+
+/* Lists */
+.responsibilities-list,
+.achievements-list {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.responsibility-item,
+.achievement-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.bullet {
+  color: var(--accent);
+  font-size: 12px;
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.bullet.success {
+  color: #5ae86a;
+}
+
+/* Footer */
+.project-footer {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.tech-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tech-tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
   color: var(--text-muted);
-  padding: 3px 10px;
+  padding: 4px 12px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border);
+  transition: all 0.2s;
 }
 
-.project-arrow {
-  font-family: var(--font-mono);
-  font-size: 18px;
-  color: var(--text-muted);
-  transition: all 0.3s;
+.tech-tag:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--accent-subtle);
 }
 
-.project-row:hover .project-arrow {
-  color: var(--accent);
-  transform: translateX(4px);
+/* Responsive */
+@media (max-width: 768px) {
+  .project-card {
+    padding: 24px;
+  }
+
+  .project-idx {
+    font-size: 32px;
+  }
+
+  .project-name {
+    font-size: 18px;
+  }
+
+  .project-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
 }
 </style>

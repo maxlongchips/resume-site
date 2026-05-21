@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar.vue'
 import TabBar from './components/TabBar.vue'
 import HeroSection from './components/HeroSection.vue'
 import AboutSection from './components/AboutSection.vue'
+import ExperienceSection from './components/ExperienceSection.vue'
 import SkillsSection from './components/SkillsSection.vue'
 import ProjectsSection from './components/ProjectsSection.vue'
 import ContactSection from './components/ContactSection.vue'
@@ -60,6 +61,7 @@ onMounted(() => {
       <div class="content-area">
         <HeroSection id="hero" />
         <AboutSection id="about" />
+        <ExperienceSection id="experience" />
         <SkillsSection id="skills" />
         <ProjectsSection id="projects" />
         <ContactSection id="contact" />
@@ -92,7 +94,8 @@ onMounted(() => {
 
 .content-area {
   padding: 80px 100px;
-  max-width: 1000px;
+  max-width: 1100px;
+  margin: 0 auto;
   position: relative;
 }
 
@@ -109,6 +112,7 @@ onMounted(() => {
 @media (max-width: 1024px) {
   .content-area {
     padding: 60px 40px;
+    max-width: 100%;
   }
 
   .content-area::before {

@@ -1,10 +1,6 @@
 @import "tailwindcss";
 
-@import "@fontsource/space-grotesk/300.css";
-@import "@fontsource/space-grotesk/400.css";
-@import "@fontsource/space-grotesk/500.css";
-@import "@fontsource/space-grotesk/600.css";
-@import "@fontsource/space-grotesk/700.css";
+@import "@fontsource-variable/inter";
 @import "@fontsource/jetbrains-mono/300.css";
 @import "@fontsource/jetbrains-mono/400.css";
 @import "@fontsource/jetbrains-mono/500.css";
@@ -28,7 +24,7 @@
   --accent-glow: rgba(232, 168, 73, 0.15);
   --accent-subtle: rgba(232, 168, 73, 0.06);
 
-  --font-sans: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
   --font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
 }
