@@ -1,18 +1,34 @@
 import { defineConfig, globalIgnores } from "eslint/config";
-import nextVitals from "eslint-config-next/core-web-vitals";
-import nextTs from "eslint-config-next/typescript";
+import pluginVue from "eslint-plugin-vue";
 
 const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
-  // Override default ignores of eslint-config-next.
-  globalIgnores([
-    // Default ignores of eslint-config-next:
-    ".next/**",
-    "out/**",
-    "build/**",
-    "next-env.d.ts",
-  ]),
+  ...globalIgnores(["dist/**", "node_modules/**", ".vscode/**", ".idea/**"]),
+  {
+    files: ["**/*.{js,mjs,cjs,ts,vue}"],
+    plugins: {
+      vue: pluginVue,
+    },
+    languageOptions: {
+      parserOptions: {
+        parser: "@typescript-eslint/parser",
+        extraFileExtensions: [".vue"],
+        sourceType: "module",
+      },
+    },
+    rules: {
+      "vue/multi-word-component-names": 0,
+    },
+  },
+  {
+    files: ["**/*.vue"],
+    languageOptions: {
+      parserOptions: {
+        parser: "@typescript-eslint/parser",
+        extraFileExtensions: [".vue"],
+        sourceType: "module",
+      },
+    },
+  },
 ]);
 
 export default eslintConfig;
