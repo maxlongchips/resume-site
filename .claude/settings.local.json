@@ -8,7 +8,9 @@
       "Bash(npm create *)",
       "Bash(cp -r temp-vue/src .)",
       "Bash(cp -r temp-vue/public .)",
-      "Bash(npm install *)"
+      "Bash(npm install *)",
+      "Bash(npm ls *)",
+      "Bash(timeout 15 npm run dev)"
     ]
   }
 }
