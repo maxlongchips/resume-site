@@ -121,7 +121,7 @@ export const useResumeStore = defineStore('resume', () => {
   const saved = loadFromStorage()
 
   const personal = ref<ResumePersonal>(
-    saved?.personal ?? {
+    (saved?.personal as ResumePersonal) ?? {
       name: '李强',
       nameEn: 'Li Qiang',
       title: '资深前端开发',
@@ -133,7 +133,7 @@ export const useResumeStore = defineStore('resume', () => {
   )
 
   const stats = ref<ResumeStat[]>(
-    saved?.stats ?? [
+    (saved?.stats as ResumeStat[]) ?? [
       { value: '8+', label: 'Years Exp' },
       { value: '6+', label: 'Projects' },
       { value: '200+', label: 'Pages Built' },
@@ -141,7 +141,7 @@ export const useResumeStore = defineStore('resume', () => {
   )
 
   const aboutCards = ref<ResumeAboutCard[]>(
-    saved?.aboutCards ?? [
+    (saved?.aboutCards as ResumeAboutCard[]) ?? [
       { icon: '⌘', label: 'Location', value: '湖南长沙' },
       { icon: '◈', label: 'Focus', value: 'Vue3 / 小程序 / 企业级系统' },
       { icon: '◉', label: 'Status', value: 'Open to work', accent: true },
@@ -152,7 +152,7 @@ export const useResumeStore = defineStore('resume', () => {
   )
 
   const basic = ref<ResumeBasic>(
-    saved?.basic ?? {
+    (saved?.basic as ResumeBasic) ?? {
       phone: '138-0000-0000',
       email: 'liqiang.dev@gmail.com',
       location: '湖南长沙',
@@ -161,7 +161,7 @@ export const useResumeStore = defineStore('resume', () => {
   )
 
   const about = ref<ResumeAbout[]>(
-    saved?.about ?? [
+    (saved?.about as ResumeAbout[]) ?? [
       {
         id: uid(),
         content:
@@ -171,7 +171,7 @@ export const useResumeStore = defineStore('resume', () => {
   )
 
   const experiences = ref<ResumeExperience[]>(
-    saved?.experiences ?? [
+    (saved?.experiences as ResumeExperience[]) ?? [
       {
         id: uid(),
         company: '老百姓大药房',
@@ -217,7 +217,7 @@ export const useResumeStore = defineStore('resume', () => {
   )
 
   const projects = ref<ResumeProject[]>(
-    saved?.projects ?? [
+    (saved?.projects as ResumeProject[]) ?? [
       {
         id: uid(),
         name: '老百姓大药房小程序（lbxmall）',
@@ -457,7 +457,7 @@ export const useResumeStore = defineStore('resume', () => {
   )
 
   const skillGroups = ref<ResumeSkillGroup[]>(
-    saved?.skillGroups ?? [
+    (saved?.skillGroups as ResumeSkillGroup[]) ?? [
       {
         id: uid(),
         title: 'Core',
@@ -502,7 +502,7 @@ export const useResumeStore = defineStore('resume', () => {
   )
 
   const contacts = ref<ResumeContact[]>(
-    saved?.contacts ?? [
+    (saved?.contacts as ResumeContact[]) ?? [
       { id: uid(), icon: '@', label: 'EMAIL', value: 'liqiang.dev@gmail.com', href: 'mailto:liqiang.dev@gmail.com' },
       { id: uid(), icon: '{ }', label: 'GITHUB', value: 'github.com/liqiang', href: 'https://github.com/liqiang' },
       { id: uid(), icon: 'in', label: 'LINKEDIN', value: 'linkedin.com/in/liqiang', href: 'https://linkedin.com/in/liqiang' },
