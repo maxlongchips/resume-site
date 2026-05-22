@@ -1,11 +1,20 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { experiences } from '../data/content'
+import { ref, computed } from 'vue'
+import { useResumeStore, htmlToArr, stripHtml } from '../stores/resume'
 import SectionHeader from './SectionHeader.vue'
 import { useScrollReveal } from '../composables/useScrollReveal'
 
+const store = useResumeStore()
 const sectionRef = ref<HTMLElement | null>(null)
 useScrollReveal(sectionRef)
+
+const experiences = computed(() =>
+  store.experiences.map((exp) => ({
+    ...exp,
+    description: stripHtml(exp.description),
+    achievements: htmlToArr(exp.achievements),
+  })),
+)
 </script>
 
 <template>
@@ -149,14 +158,14 @@ useScrollReveal(sectionRef)
 
 .timeline-period {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--accent);
   margin-bottom: 8px;
   letter-spacing: 0.05em;
 }
 
 .timeline-company {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 600;
   color: var(--text);
   margin-bottom: 4px;
@@ -164,14 +173,14 @@ useScrollReveal(sectionRef)
 }
 
 .timeline-position {
-  font-size: 14px;
+  font-size: 16px;
   color: var(--text-dim);
   font-weight: 300;
 }
 
 /* Description */
 .timeline-desc {
-  font-size: 14px;
+  font-size: 16px;
   color: var(--text-dim);
   line-height: 1.8;
   margin-bottom: 20px;
@@ -185,7 +194,7 @@ useScrollReveal(sectionRef)
 
 .achievements-title {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-muted);
   letter-spacing: 0.15em;
   text-transform: uppercase;
@@ -204,14 +213,14 @@ useScrollReveal(sectionRef)
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-dim);
   line-height: 1.6;
 }
 
 .achievement-bullet {
   color: var(--accent);
-  font-size: 12px;
+  font-size: 14px;
   margin-top: 2px;
   flex-shrink: 0;
 }
@@ -225,7 +234,7 @@ useScrollReveal(sectionRef)
 
 .tech-tag {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   padding: 4px 12px;
   background: rgba(255, 255, 255, 0.02);

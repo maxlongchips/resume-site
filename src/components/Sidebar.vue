@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { personal, navItems } from '../data/content'
+import { navItems } from '../data/content'
+import { useResumeStore } from '../stores/resume'
+import ThemeToggle from './ThemeToggle.vue'
+
+const store = useResumeStore()
 
 defineProps<{
   activeSection: string
+  open?: boolean
 }>()
 
 defineEmits<{
@@ -11,34 +16,22 @@ defineEmits<{
 </script>
 
 <template>
-  <aside class="sidebar">
-    <!-- Terminal dots -->
-    <div class="flex items-center gap-2 px-5 py-3.5 border-b border-[var(--border)]">
-      <span class="w-2.5 h-2.5 rounded-full bg-[#e85c4a]"></span>
-      <span class="w-2.5 h-2.5 rounded-full bg-[var(--accent)]"></span>
-      <span class="w-2.5 h-2.5 rounded-full bg-[#5ae86a]"></span>
-    </div>
-
-    <!-- Avatar area -->
-    <div class="text-center py-10 px-6">
-      <div class="avatar-ring mx-auto mb-5">
+  <aside class="sidebar" :class="{ open }">
+    <!-- Avatar + Name -->
+    <div class="sidebar-header">
+      <div class="avatar-ring">
         <div class="avatar-inner">
-          {{ personal.avatarChar }}
+          {{ store.personal.avatarChar }}
         </div>
       </div>
-      <div class="text-lg font-semibold tracking-[0.2em] mb-1">
-        {{ personal.name }}
-      </div>
-      <div class="font-[var(--font-mono)] text-[11px] text-[var(--accent)] tracking-widest">
-        {{ personal.titleEn }}
+      <div class="sidebar-identity">
+        <div class="sidebar-name">{{ store.personal.name }}</div>
+        <div class="sidebar-title">{{ store.personal.title }}</div>
       </div>
     </div>
 
     <!-- Navigation -->
     <nav class="flex-1 py-7">
-      <div class="px-7 mb-4 font-[var(--font-mono)] text-[9px] text-[var(--text-muted)] tracking-[0.2em] uppercase">
-        Explorer
-      </div>
       <div
         v-for="item in navItems"
         :key="item.id"
@@ -49,14 +42,25 @@ defineEmits<{
         <span class="nav-num">{{ item.num }}</span>
         <span>{{ item.label }}</span>
       </div>
+
+      <!-- Editor link -->
+      <router-link to="/editor" class="nav-item editor-link">
+        <span class="nav-num">07</span>
+        <span>简历编辑</span>
+      </router-link>
     </nav>
 
-    <!-- Status -->
-    <div class="px-7 py-5 border-t border-[var(--border)]">
-      <div class="flex items-center gap-2.5 font-[var(--font-mono)] text-[11px] text-[var(--text-dim)]">
+    <!-- Status (desktop) -->
+    <div class="sidebar-status">
+      <div class="flex items-center gap-2.5 font-[var(--font-mono)] text-[13px] text-[var(--text-dim)]">
         <span class="status-dot"></span>
         <span>Available for work</span>
       </div>
+    </div>
+
+    <!-- Theme toggle (mobile only) -->
+    <div class="sidebar-theme">
+      <ThemeToggle />
     </div>
   </aside>
 </template>
@@ -83,53 +87,60 @@ defineEmits<{
   opacity: 0.3;
 }
 
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 24px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
 .avatar-ring {
-  width: 90px;
-  height: 90px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.avatar-ring::before {
-  content: '';
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  border: 1px solid var(--accent);
-  opacity: 0.4;
-}
-
-.avatar-ring::after {
-  content: '';
-  position: absolute;
-  inset: -8px;
-  border-radius: 50%;
-  border: 1px dashed var(--accent);
-  opacity: 0.15;
-  animation: spin 20s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+  flex-shrink: 0;
 }
 
 .avatar-inner {
-  width: 80px;
-  height: 80px;
+  width: 48px;
+  height: 48px;
   border-radius: 50%;
   background: linear-gradient(135deg, var(--accent) 0%, var(--accent-warm) 100%);
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: var(--font-serif);
-  font-size: 32px;
+  font-size: 20px;
   font-weight: 700;
   color: var(--bg);
+}
+
+.sidebar-identity {
+  min-width: 0;
+}
+
+.sidebar-name {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-title {
+  font-size: 12px;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav-item {
@@ -141,8 +152,8 @@ defineEmits<{
   color: var(--text-dim);
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
-  font-size: 13px;
-  font-family: var(--font-mono);
+  font-size: 14px;
+  font-family: var(--font-sans);
 }
 
 .nav-item::before {
@@ -171,13 +182,32 @@ defineEmits<{
 }
 
 .nav-num {
-  font-size: 9px;
+  font-size: 11px;
   color: var(--text-muted);
   width: 20px;
+  font-family: var(--font-mono);
 }
 
 .nav-item.active .nav-num {
   color: var(--accent);
+}
+
+.editor-link {
+  text-decoration: none;
+  border-top: 1px dashed var(--border);
+  margin-top: 4px;
+  padding-top: 12px;
+}
+
+.sidebar-status {
+  padding: 20px 28px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-theme {
+  display: none;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
 }
 
 .status-dot {
@@ -200,17 +230,16 @@ defineEmits<{
   }
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1024px) and (min-width: 769px) {
   .sidebar {
     width: 60px;
   }
 
-  .sidebar .avatar-ring,
-  .sidebar .sidebar-name,
-  .sidebar .sidebar-title,
-  .sidebar nav .nav-label,
-  .sidebar nav .nav-item span:not(.nav-num),
-  .sidebar .status-dot + span {
+  .sidebar .sidebar-header {
+    display: none;
+  }
+
+  .sidebar nav .nav-item span:not(.nav-num) {
     display: none;
   }
 
@@ -237,6 +266,18 @@ defineEmits<{
 
   .sidebar.open {
     left: 0;
+  }
+
+  .sidebar nav .nav-num {
+    display: none;
+  }
+
+  .sidebar-status {
+    display: none;
+  }
+
+  .sidebar-theme {
+    display: block;
   }
 }
 </style>

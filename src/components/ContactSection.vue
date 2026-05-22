@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { contacts } from '../data/content'
+import { ref, computed } from 'vue'
+import { useResumeStore } from '../stores/resume'
 import SectionHeader from './SectionHeader.vue'
 import { useScrollReveal } from '../composables/useScrollReveal'
 
+const store = useResumeStore()
 const sectionRef = ref<HTMLElement | null>(null)
 useScrollReveal(sectionRef)
+const contacts = computed(() => store.contacts)
 </script>
 
 <template>
   <section ref="sectionRef" class="mb-25">
-    <SectionHeader command="cat contact.ts" section-num="04" />
+    <SectionHeader command="cat contact.ts" section-num="06" />
 
-    <div class="grid grid-cols-2 gap-5" data-reveal>
+    <div class="contacts-grid" data-reveal>
       <component
         :is="contact.href ? 'a' : 'div'"
         v-for="contact in contacts"
@@ -21,12 +23,13 @@ useScrollReveal(sectionRef)
         :href="contact.href"
         :target="contact.href?.startsWith('http') ? '_blank' : undefined"
         :rel="contact.href?.startsWith('http') ? 'noopener noreferrer' : undefined"
+        :aria-label="contact.label + ': ' + contact.value"
       >
         <div class="contact-icon-box">
           {{ contact.icon }}
         </div>
         <div>
-          <div class="font-[var(--font-mono)] text-[9px] text-[var(--text-muted)] tracking-[0.15em] mb-1">
+          <div class="font-[var(--font-mono)] text-[11px] text-[var(--text-muted)] tracking-[0.15em] mb-1">
             {{ contact.label }}
           </div>
           <div class="text-sm text-[var(--text)]">
@@ -39,6 +42,18 @@ useScrollReveal(sectionRef)
 </template>
 
 <style scoped>
+.contacts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 768px) {
+  .contacts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .contact-card {
   padding: 30px;
   background: var(--surface);

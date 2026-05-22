@@ -1,0 +1,871 @@
+# 580健康我帮您 - 互联网医院小程序 · 技术深度文档
+> **项目角色**：前端负责人 & 核心开发 | **团队规模**：6人 | **迭代周期**：2019至今（6年+）  
+**代码规模**：243次非合并提交 / 8位贡献者 / 30+页面 / 50+接口  
+**技术栈**：微信小程序原生框架（WXML/WXSS/JS）+ Node.js + 阿里云OSS
+>
+
+---
+
+## 一、项目介绍
+### 一句话版本
+> 老百姓大药房旗下互联网医院微信小程序，承载在线问诊（图文/视频/AI）全流程，对接4家医疗服务供应商，服务千万级用户。
+>
+
+### 详细版本
+"健康我帮您"是老百姓大药房集团旗下的互联网医院微信小程序，为用户提供在线问诊、电子处方、药品购买一站式服务。用户从商城小程序跳入，经过门店解析、医生选择、问诊提交、在线支付、诊室交互（图文/视频/AI三种模式），最终获取处方并完成购药闭环。
+
+项目从2019年启动，至今持续迭代6年，累计243次提交，由8位开发者协作完成。作为前端负责人，我主导了架构设计、核心模块开发、代码审查（MR/CR）以及多次线上故障修复。项目面临的核心技术挑战包括：多供应商协议适配、实时通信双通道协调、支付幂等设计、AI问诊状态机、GrowingIO埋点体系演进等。
+
+---
+
+## 二、核心模块拆解
+### 2.1 问诊提交模块（inquiry.js · 1191行）
+问诊提交是整个项目的核心业务入口，负责从用户选择医生/药品到发起支付的完整链路。
+
+#### 2.1.1 七步校验链
+`addButSubmit()` 函数实现了一条严格的7步校验链，采用"快速失败 + 明确错误源"策略：
+
+```plain
+门店校验 → 患者校验 → 选项校验 → 药品校验 → 协议校验 → 条约校验 → GIO埋点上报
+```
+
+| 步骤 | 校验内容 | 失败提示 |
+| --- | --- | --- |
+| 1. 门店校验 | `CACHE_store_information` 是否存在 | "请选择门店" |
+| 2. 患者校验 | 患者信息是否填写完整 | "请填写患者信息" |
+| 3. 选项校验 | 问诊类型/症状描述是否选择 | "请选择问诊选项" |
+| 4. 药品校验 | `setMealList` 中 `prescriptionType + serviceType` 矩阵匹配 | "请选择药品" |
+| 5. 协议校验 | 用户协议是否勾选 | "请同意用户协议" |
+| 6. 条约校验 | `checkUserTreaty` 接口异步校验 | "请签署问诊条约" |
+| 7. GIO埋点 | 校验全部通过后才上报"提交成功"事件 | — |
+
+
+**设计决策**：GIO埋点放在最后一步，确保GrowingIO后台转化漏斗数据的准确性。如果放在第一步，用户看到的是"提交了但实际没成功"的虚假数据。
+
+#### 2.1.2 参数组装
+`getDemandInit()` 负责组装提交参数，核心设计是 `Object.assign` 合并动态选项：
+
+```javascript
+// 伪代码示意
+let params = Object.assign(
+  {}, 
+  baseParams,           // 基础参数（门店、患者）
+  dynamicOptions        // 动态选项（问诊类型、药品列表）
+);
+// 视频问诊额外处理：goodsList 需要 JSON 序列化
+if (serviceType === 'video') {
+  params.goodsList = JSON.stringify(goodsList);
+}
+// 拆方发药：distinguish/unit 字段处理
+if (isDismantle) {
+  params.distinguish = 1;
+  params.unit = selectedUnit;
+}
+```
+
+#### 2.1.3 支付幂等流程
+支付采用两步设计：先查后付，防止重复支付。
+
+```plain
+payQuery()  →  查询订单状态
+    ├── 已支付  →  直接进诊室
+    ├── 未支付  →  payParems() 发起支付
+    └── 异常    →  cancelVisits() 取消并清理
+```
+
+**为什么要先查**：用户可能支付成功但网络超时未收到回调，或从支付页返回后重新点击。直接调 `payParems` 会触发微信"订单已支付"错误。
+
+#### 2.1.4 状态机与轮询
+`queryOrderStatus()` 实现了一个基于 `serviceType × status × videoAccept` 的状态矩阵：
+
+| serviceType | status | videoAccept | 含义 | 动作 |
+| --- | --- | --- | --- | --- |
+| 图文(0) | 0 | — | 待接诊 | 继续轮询(15s) |
+| 图文(0) | 1 | — | 已接诊 | 跳转诊室 |
+| 图文(0) | 2 | — | 进行中 | 跳转诊室 |
+| 图文(0) | 3 | — | 已完成 | 结束 |
+| 视频(1) | 0 | 0 | 待接诊 | 调用 waitCheck(8s) |
+| 视频(1) | 0 | 1 | 医生已接诊 | 跳转视频 |
+| 视频(1) | 2 | — | 进行中 | 跳转诊室 |
+
+
+轮询协调机制：
+
++ 图文问诊：15秒间隔 HTTP 轮询
++ 视频问诊：8秒间隔 `waitCheck()` 轮询
++ WebSocket `RECEIVE_ORDER` 事件 → 设置 `is_poll = true` 中止轮询
++ 取消时 `CancelPolling()` 统一清理4个定时器
+
+#### 2.1.5 取消流程
+`cancelVisits()` 负责取消问诊单，涉及多处清理：
+
+```javascript
+cancelVisits() {
+  // 1. 调用取消接口（区分普通取消和视频已发送取消）
+  //    - 普通：demand_cancel
+  //    - 视频已发送邀请：cancel_have_sent_video
+  // 2. 同步商城订单状态
+  // 3. 清理4个定时器（CancelPolling）
+  // 4. 重置页面状态
+}
+```
+
+#### 2.1.6 postradecode 跨页追踪
+在 `onLoad` 中生成 UUID，写入缓存，贯穿整个问诊流程：
+
+```javascript
+// inquiry.js onLoad
+let postradecode = regex.newGuid();
+wxcache.set({ key: 'CACHE_MZTC_POSTRADECODE', value: postradecode, sync: 'sync' });
+```
+
+该 UUID 随支付、诊室、埋点请求流转，用于 GrowingIO 后台的全链路追踪。
+
+---
+
+### 2.2 诊室模块（room.js · 1206行）
+诊室是问诊交互的核心页面，承载图文聊天、AI问卷、视频跳转三大功能。
+
+#### 2.2.1 入口路由
+`getDiagnosisInfo()` 作为诊室入口，根据订单状态做分流：
+
+```plain
+getDiagnosisInfo()
+    ├── 已完成 → endConsult() 结束问诊
+    ├── AI模式 → inquiryAi() 进入AI问卷
+    └── 图文模式 → getChatInfo() 加载聊天记录
+```
+
+#### 2.2.2 聊天历史加载
+`getChatInfo()` 加载历史消息，核心是消息类型映射：
+
+```javascript
+// 消息类型映射
+switch (msg.type) {
+  case 1: type = 'TEXT';    break;  // 文字消息
+  case 2: type = 'IMAGE';   break;  // 图片消息
+  case 4: type = 'DETAIL';  break;  // 详情卡片
+  default: type = 'RECIPE'; break;  // 处方消息
+}
+// 消息方向判断：3-target trick
+// target=3 表示医生发的，否则是患者发的
+let isDoctor = (msg.target === 3);
+```
+
+#### 2.2.3 WebSocket 事件处理
+`socketListen()` 注册6个事件处理器：
+
+| 事件 | MsgType | 处理逻辑 |
+| --- | --- | --- |
+| MSG_TEXT | 文字消息 | 追加到聊天列表，滚动到底部 |
+| MSG_IMAGE | 图片消息 | 追加图片消息，支持预览 |
+| MSG_PRESCRIPTION | 处方消息 | 渲染处方卡片 |
+| CHINESE_MSG_PRESCRIPTION | 中药处方 | 特殊渲染（含剂量、煎法） |
+| SEND_INVITE_MESSAGE | 视频邀请 | 触发视频跳转流程 |
+| ACCOUNT_AGREE | 医生接诊 | 更新状态，停止轮询 |
+| END_CONSULT | 结束问诊 | 标记结束，跳转评价 |
+
+
+#### 2.2.4 AI问卷引擎
+`inquiryAi()` 加载AI问诊流程，`addButSubmit()` 中用 switch-case 处理7种题目类型：
+
+| subjectType | 类型 | 校验逻辑 | 提交字段 |
+| --- | --- | --- | --- |
+| 1 | 单选题 | 必选一个 | answer |
+| 2 | 多选题 | 至少选一个 | answer（逗号分隔） |
+| 3 | 填空题 | 非空校验 | answer |
+| 4 | 上传题 | 至少一张图片 | answer（图片URL） |
+| 5 | 药品选择 | 选中药品ID | medicineString |
+| 6 | 中药方 | 药品+剂量 | medicineString + chineseDrugState + dosage |
+| 7 | 确认题 | 确认/取消 | answer |
+
+
+`AnswerInterface()` 提交答案时区分 `medicineString`（药品类）和 `answer`（文本类）两个字段，中药方额外携带 `chineseDrugState` 和 `dosage`。提交后有2秒 fallback `setTimeout`，防止接口无响应时页面卡死。
+
+#### 2.2.5 视频跳转
+`JumpVideoFn()` 实现跨小程序跳转：
+
+```javascript
+JumpVideoFn() {
+  // 1. 获取 accountSig（腾讯云账号签名）
+  requestNew({ url: api.get_account_sig.url, ... })
+  // 2. 获取 privateMapKey（房间密钥）
+  requestNew({ url: api.private_key.url, ... })
+  // 3. 跳转腾讯云小程序
+  wxapi.wxNavigateToMiniProgram({
+    appId: 'wxa111111111',  // 腾讯云小程序appId
+    path: 'pages/room/room',
+    extraData: { accountSig, privateMapKey, demandId }
+  })
+}
+```
+
+返回时在 `onShow` 中调 `getDiagnosisInfo()` 检查最新状态，用服务端状态而非客户端状态做决策。
+
+#### 2.2.6 结束问诊
+`endConsult()` 用 `hasReportedEnd` 标志防止重复上报GIO事件：
+
+```javascript
+endConsult() {
+  if (this.hasReportedEnd) return;
+  this.hasReportedEnd = true;
+  gioBusinessTrack('consult_end', { ... });
+  // 跳转评价页或返回首页
+}
+```
+
+---
+
+### 2.3 WebSocket 通信模块（socket.js · 201行）
+自定义 WebSocket 客户端，支持自动重连、消息队列、双通道注册。
+
+#### 2.3.1 核心设计
+```javascript
+// 12种消息类型常量
+const MsgType = {
+  MSG_TEXT: 'MSG_TEXT',
+  MSG_IMAGE: 'MSG_IMAGE',
+  MSG_PRESCRIPTION: 'MSG_PRESCRIPTION',
+  // ... 共12种
+};
+
+// 消息队列：连接建立前缓存消息
+_msgQueue: [];
+
+// 双通道注册
+_register() {
+  // IM通道：productType = 3
+  // 视频通道：productType = 4
+}
+```
+
+#### 2.3.2 生命周期
+```plain
+connect()
+    ├── onSocketOpen → flush _msgQueue → _register(双通道)
+    ├── onSocketMessage → _onMsg → 分发到回调
+    ├── onSocketClose → autoReconnect → connect()
+    └── onSocketError → onSocketClose
+```
+
+#### 2.3.3 消息防重
+每条消息有唯一 `msgId`，收到重复 `msgId` 直接丢弃。
+
+---
+
+### 2.4 HTTP 请求模块（requestNew.js · 174行）
+统一的 HTTP 请求封装，支持多环境、loading管理、401自动刷新。
+
+#### 2.4.1 Loading 计数器
+```javascript
+let httpNum = 0;  // 请求计数
+// 请求开始：httpNum++，显示 loading
+// 请求结束：httpNum--，httpNum===0 时隐藏 loading
+```
+
+避免多个并发请求时 loading 闪烁。
+
+#### 2.4.2 三种 Header 模式
+| 模式 | 用途 | 特殊Header |
+| --- | --- | --- |
+| default | 普通接口 | Authorization: token |
+| postIM | IM消息 | + productType: 3 |
+| postVideo | 视频消息 | + productType: 4 + video元数据 |
+
+
+#### 2.4.3 401 死循环防护
+```javascript
+let res401 = false;  // 标志位
+
+if (response.statusCode === 401) {
+  if (!res401) {
+    res401 = true;
+    // 刷新 token
+    newLogin.wxLogin().then(() => {
+      res401 = false;
+      // 重试当前请求
+    });
+  } else {
+    // 正在刷新中，当前请求失败
+    // 防止死循环
+  }
+}
+```
+
+---
+
+### 2.5 登录模块（newLogin.js · 163行）
+#### 2.5.1 微信授权登录
+```javascript
+wxLogin(type) {
+  js_code = wxapi.wxLogin();        // 获取微信 code
+  res = requestNew(auto_ogin);       // 换取用户信息
+  wxcache.set('CACHE_lbx_userinfo'); // 缓存用户信息
+  wxcache.set('CACHE_uid');          // 缓存用户ID
+  wxcache.set('CACHE_access_token'); // 缓存token
+  wxcache.set('CACHE_guid');         // 缓存全局唯一ID
+  wxcache.set('CACHE_crm_uid');      // 缓存CRM用户ID
+}
+```
+
+#### 2.5.2 商城用户跨端登录
+`lbxMalllogon()` 支持从商城小程序带 `member_id` 和 `store_id` 跳入时的自动登录，额外触发 `buriedDatapoints.businessCollect` 上报商城来源事件。
+
+---
+
+### 2.6 缓存模块（wxcache.js · 110行）
+带 TTL 机制的本地缓存封装。
+
+```javascript
+// 写入格式：{ expires: 时间戳, data: 数据 }
+// expires = 0 表示永不过期
+
+set(params) {
+  cacheData.expires = params.expireSeconds 
+    ? Date.now()/1000 + params.expireSeconds 
+    : 0;
+  cacheData.data = params.value;
+  params.sync === 'sync' 
+    ? wx.setStorageSync(params.key, cacheData)
+    : wx.setStorage({ key, data: cacheData });
+}
+
+get(key) {
+  cacheData = wx.getStorageSync(key);
+  if (cacheData.expires > curTimestamp || cacheData.expires === 0) {
+    return cacheData.data;  // 未过期
+  }
+  wx.removeStorageSync(key); // 已过期，清除
+  return '';
+}
+```
+
+---
+
+### 2.7 埋点模块
+#### 2.7.1 自建埋点（buriedDatapoints.js · 232行）
+18个硬编码事件（key1-key18），覆盖从商城入口到问诊提交的完整漏斗：
+
+| 事件 | 触发时机 |
+| --- | --- |
+| key1 | 商城用户登录成功 |
+| key2 | 进入首页 |
+| key3 | 选择门店 |
+| key4 | 查看医生列表 |
+| key5 | 选择医生 |
+| ... | ... |
+| key18 | 问诊提交成功 |
+
+
+#### 2.7.2 GrowingIO 埋点（gioTrack.js · 72行）
+两层架构：
+
+```javascript
+// 底层：基础埋点
+function gioTrack(et, ep = {}) {
+  // 1. null/undefined/空字符串 过滤
+  // 2. 自动注入 pageName_var（当前页面路径）
+  // 3. 调用 gio('track', et, finalParams)
+}
+
+// 上层：业务埋点封装
+function gioBusinessTrack(eventName, extraParams = {}) {
+  // 1. 从缓存读取门店信息 → deptIdVal
+  // 2. 从缓存读取 postradecode
+  // 3. 从缓存读取 medInsureType
+  // 4. 组装6个公共字段 + 额外参数
+  // 5. 调用 gioTrack()
+}
+```
+
+6个业务公共字段：
+
+| 字段 | 来源 | 说明 |
+| --- | --- | --- |
+| channelCode | 硬编码 '580' | 渠道标识 |
+| postradecode | CACHE_MZTC_POSTRADECODE | 跨页追踪UUID |
+| netHospitalCode | 硬编码 'Kz580' | 互联网医院编码 |
+| deptid | CACHE_store_information.lbx_store_id | 门店ID |
+| medInsureType | CACHE_MZTC_MEDINSURETYPE | 业务类型(0图文/1视频) |
+| prescriptionId | extraParams / CACHE / pageData | 处方ID（三级回退） |
+
+
+---
+
+### 2.8 工具模块
+#### wxapi.js（781行）
+40+个微信原生 API 的 Promise 封装，统一的 resolve/reject 模式：
+
+```javascript
+wxXxx(params) {
+  return new Promise((resolve, reject) => {
+    wx.xxx({
+      ...params,
+      success(res) { resolve(res); },
+      fail(err) { reject(err); }
+    });
+  });
+}
+```
+
+覆盖：登录、支付、路由、导航栏、图片、位置、文件上传下载、扫码、震动、分享等。
+
+#### ossUpload.js（105行）
+阿里云 OSS 直传，使用 STS 临时凭证：
+
+```plain
+请求 oss_url 接口 → 获取 host/policy/signature/accessid/dir
+→ wx.chooseImage 选图 → wx.uploadFile 直传 OSS
+→ 拼接最终 URL: host + '/' + key
+```
+
+文件名规则：`dir + 日期 + GUID + 扩展名`
+
+#### commonRequest.js（38行）
+协议签署相关：`checkUserTreaty`（检查是否签署）+ `signUserTreaty`（签署协议）
+
+---
+
+## 三、技术架构亮点
+### 3.1 缓存总线模式
+**问题**：问诊流程跨5个页面（index → inquiry → room → 支付 → 视频），需要共享门店、用户、订单等状态。小程序没有 Vuex/Redux 这类状态管理方案。
+
+**方案**：以 `wxcache` 为核心构建"缓存总线"，每个页面只关心 key 不关心谁写入。关键设计：
+
++ TTL 机制防止读到过期数据
++ `sync: 'sync'` 同步写入确保持久化完成后再继续
++ 命名规范：`CACHE_` 前缀 + 业务域 + 具体含义
+
+**效果**：
+
++ 页面间完全解耦，新增页面无需修改其他页面
++ 数据持久化，页面销毁重建后状态不丢失
++ 可通过 key 名快速定位数据来源和用途
+
+---
+
+### 3.2 WebSocket + HTTP 双通道协调
+**问题**：图文/视频问诊需要实时消息推送，同时订单状态变更需要可靠检测。单一通道无法同时满足实时性和可靠性。
+
+**方案**：
+
++ WebSocket 负责实时消息（文字、图片、处方、视频邀请）
++ HTTP 轮询负责状态变更检测（15s图文 / 8s视频）
++ `is_poll` 标志位做互斥：WebSocket 收到事件 → 中止轮询
++ 消息防重：`msgId` 去重
++ 断线重连：`onSocketClose` → 自动 `connect()` → `_register()` 双通道
+
+**效果**：
+
++ 实时消息延迟 < 1s
++ 状态变更最多延迟 15s（图文）/ 8s（视频）
++ 断线恢复时间 < 3s
++ 消息零丢失（WebSocket推送 + 进入时全量拉取兜底）
+
+---
+
+### 3.3 支付幂等设计
+**问题**：用户可能支付成功但网络超时未收到回调，或从支付页返回后重新点击。直接发起支付会触发微信"订单已支付"错误。
+
+**方案**：`payQuery` → `payParems` 两步走。
+
+```plain
+payQuery() 查询订单状态
+    ├── 已支付  → 直接进诊室（跳过支付）
+    ├── 未支付  → payParems() 发起支付
+    └── 异常    → cancelVisets() 取消 + 清理
+```
+
+**效果**：
+
++ 消除重复支付问题
++ 异常订单自动清理，不留脏数据
++ 用户体验：已支付订单直接进诊室，无需重复操作
+
+---
+
+### 3.4 401 死循环防护
+**问题**：token 过期后，所有请求都会收到 401。如果每个 401 都触发登录刷新，会产生 N 次登录请求，导致死循环。
+
+**方案**：模块级 `res401` 标志位。
+
+```plain
+请求401 → res401 === false?
+    ├── 是 → res401 = true → wxLogin() 刷新token → res401 = false → 重试
+    └── 否 → 正在刷新中，当前请求失败（不重复触发）
+```
+
+**效果**：
+
++ 无论多少并发请求同时 401，只触发一次登录刷新
++ token 刷新完成后自动重试触发请求
++ 避免了"401风暴"导致的接口雪崩
+
+---
+
+### 3.5 AI问卷状态机
+**问题**：AI问诊包含7种题型（单选、多选、填空、上传、药品选择、中药方、确认），每种题型的校验逻辑、提交字段、渲染方式都不同。
+
+**方案**：`addButSubmit()` 中用 switch-case 实现状态机，每种 `subjectType` 独立处理：
+
+```plain
+subjectType → 校验逻辑 → 提交字段 → 渲染方式
+    1(单选)   → 必选一个   → answer    → 单选列表
+    2(多选)   → 至少一个   → answer    → 多选列表
+    3(填空)   → 非空      → answer    → 输入框
+    4(上传)   → 至少一图   → answer    → 图片网格
+    5(药品)   → 选中ID    → medicineString → 药品卡片
+    6(中药)   → 药品+剂量  → medicineString + dosage → 中药方卡片
+    7(确认)   → 确认/取消  → answer    → 确认按钮
+```
+
+**效果**：
+
++ 新增题型只需添加一个 case，不影响其他题型
++ 校验/提交/渲染逻辑内聚，便于维护
++ 中药方的特殊字段（chineseDrugState、dosage）独立处理，不污染通用逻辑
+
+---
+
+### 3.6 埋点体系五版演进
+**问题**：埋点需求随业务增长，从几个事件扩展到18个，公共字段从0个增长到6个，散落在各页面的埋点代码难以维护。
+
+**方案**：五版迭代，逐步抽象。
+
+| 版本 | 做法 | 解决的问题 |
+| --- | --- | --- |
+| V1 | 页面内直接调 `gio('track', ...)` | 快速上线 |
+| V2 | 提取公共参数但硬编码在页面 | 减少重复参数 |
+| V3 | 引入 `gioBusinessTrack` 公共方法 | 统一入口 |
+| V4 | 三级回退（extraParams > CACHE > pageData） | 解决字段为空 |
+| V5 | null过滤 + pageName_var自动注入 | 数据质量治理 |
+
+
+**效果**：
+
++ 埋点代码从散落各页面到集中在 `gioTrack.js`（72行）
++ `medInsureType` 和 `prescriptionId` 数据可用率从 ~60% 提升到 ~95%
++ 新增埋点只需一行 `gioBusinessTrack('event_name', { ... })`
+
+---
+
+### 3.7 多环境自动检测
+**问题**：开发、测试、预发、生产四套环境，手动切换容易出错（比如开发环境连了生产接口）。
+
+**方案**：`config.js` 通过 `wx.getAccountInfoSync().miniProgram.envVersion` 自动检测：
+
+```javascript
+const accountInfo = wx.getAccountInfoSync();
+const envVersion = accountInfo.miniProgram.envVersion;
+// develop → 开发环境
+// trial   → 测试环境  
+// release → 生产环境
+```
+
+**效果**：
+
++ 零配置切换，无需修改代码
++ 杜绝环境串用的线上事故
++ `APP_ENV` 和 `LBX_version` 集中管理
+
+---
+
+## 四、Bug修复案例
+### 4.1 postradecode UUID 重复生成
+**现象**：GrowingIO 后台的全链路追踪断裂，同一问诊流程的不同阶段无法关联。
+
+**根因**：postradecode UUID 在 `onShow` 中生成，每次页面显示都会生成新 UUID。用户从支付页返回 inquiry 页面时，`onShow` 触发，覆盖了原来的 UUID。
+
+**修复**：将 UUID 生成从 `onShow` 移到 `onLoad`，确保整个页面生命周期只生成一次。
+
+```javascript
+// 修复前
+onShow() {
+  this.postradecode = regex.newGuid();  // 每次显示都生成新的
+}
+
+// 修复后
+onLoad() {
+  this.postradecode = regex.newGuid();  // 只在页面创建时生成一次
+}
+```
+
+**收获**：`onLoad` vs `onShow` 的选择要根据数据的语义——"页面级常量"用 `onLoad`，"每次可见时刷新"用 `onShow`。
+
+---
+
+### 4.2 埋点字段 medInsureType/prescriptionId 持续为空
+**现象**：GrowingIO 后台漏斗分析中 `medInsureType` 和 `prescriptionId` 两个维度全是空值，无法按业务类型和处方维度分析转化率。
+
+**根因**：`gioBusinessTrack` 中这两个字段硬编码为空字符串，没有从缓存或页面数据中读取。
+
+**修复**：实现三级回退机制。
+
+```javascript
+// 修复后：三级回退
+let medInsureType = extraParams.medInsureType          // 1. 优先用调用方传入
+  || wxcache.get('CACHE_MZTC_MEDINSURETYPE')           // 2. 其次从缓存读
+  || pageData.medInsureType;                            // 3. 最后从页面数据读
+```
+
+**收获**：埋点字段不能硬编码空值，要有兜底策略。数据质量直接影响业务分析能力。
+
+---
+
+### 4.3 channel 与 channelCode 字段名不匹配
+**现象**：GrowingIO 后台的渠道分析维度数据缺失，明明有埋点但后台收不到渠道字段。
+
+**根因**：前端上报用的字段名是 `channel`，但 GrowingIO 后台配置的 schema 是 `channelCode`。字段名不匹配导致后台忽略该字段。
+
+**修复**：统一使用 `channelCode` 作为字段名。
+
+```javascript
+// 修复前
+gioTrack('event', { channel: '580' });
+
+// 修复后
+gioTrack('event', { channelCode: '580' });
+```
+
+**收获**：埋点字段名必须与数据平台 schema 严格一致。建议维护一份字段映射表，CR 时对照审查。
+
+---
+
+### 4.4 商城用户登录后缓存残留
+**现象**：用户A从商城登录后，切换账号为用户B，但部分页面仍显示用户A的数据。
+
+**根因**：`newLogin.js` 的 `lbxMalllogon()` 写入缓存前没有清理旧数据。`CACHE_lbx_userinfo`、`CACHE_uid` 等 key 保留了上一个用户的值。
+
+**修复**：在写入新数据前先 `remove` 相关 key。
+
+```javascript
+// 修复后
+wxcache.remove('CACHE_lbx_userinfo');
+wxcache.remove('CACHE_uid');
+wxcache.remove('CACHE_access_token');
+wxcache.remove('CACHE_guid');
+// 然后再写入新用户数据
+```
+
+**收获**：缓存总线模式下，写入方有责任保证数据一致性。"先清后写"是基本规范。
+
+---
+
+### 4.5 定时器泄漏
+**现象**：长时间使用后小程序卡顿，内存占用持续增长。
+
+**根因**：`inquiry.js` 中有4个 `setInterval`/`setTimeout`（订单轮询、视频轮询、医生提醒、超时检测），部分异常路径没有清理定时器。比如用户在轮询过程中直接返回上一页，`onUnload` 没有调用 `CancelPolling()`。
+
+**修复**：在 `onUnload` 和 `cancelVisits()` 中统一调用 `CancelPolling()` 清理所有定时器，并将变量置 null 防止重复清理报错。
+
+```javascript
+CancelPolling() {
+  if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; }
+  if (this.waitTimer) { clearInterval(this.waitTimer); this.waitTimer = null; }
+  if (this.remindTimer) { clearInterval(this.remindTimer); this.remindTimer = null; }
+  if (this.timeoutTimer) { clearTimeout(this.timeoutTimer); this.timeoutTimer = null; }
+}
+```
+
+**收获**：每个 `setInterval` 必须有对应的清理路径。CR 时要追踪所有定时器的完整生命周期。
+
+---
+
+### 4.6 空 catch 块导致线上问题无法排查
+**现象**：线上偶现页面白屏，但控制台无任何错误日志，无法定位问题。
+
+**根因**：多处 `catch(e) {}` 空块吞掉了异常。比如 `ossUpload.js` 的 `_uploadPerFile` 中，OSS 上传失败后 catch 为空，用户看不到错误提示，开发者也看不到日志。
+
+**修复**：规范 CR 标准——禁止空 catch 块，至少要 `console.log`。
+
+```javascript
+// 禁止
+catch (e) {}
+
+// 至少
+catch (e) {
+  console.log('[uploadError]', e);
+  tooltip.hint(messages.no_uploading);
+}
+```
+
+**收获**：异常处理是代码质量的底线。空 catch 块是"定时炸弹"——不会立即报错，但会在关键时刻让你无法排查。
+
+---
+
+## 五、面试 Q&A
+### 5.1 项目概述类
+**Q1：介绍一下这个项目和你的角色？**
+
+> 这是老百姓大药房的互联网医院小程序，承载在线问诊全流程。我作为前端负责人，6人团队中负责架构设计、代码审查和核心模块开发。项目从2019年至今迭代6年，累计243次提交。核心业务链路是：用户从商城小程序跳入 → 门店解析 → 选择医生/药品 → 提交问诊单 → 支付 → 进入诊室（图文/视频/AI三种模式）→ 获取处方 → 结束。
+>
+
+**追问：4家服务商，前端怎么屏蔽这些差异？**
+
+> 后端做了大部分统一，但前端仍需适配。关键在 `inquiry.js` 的 `queryOrderStatus()`——同一个 `status` 值在不同 `serviceType` 下含义不同。前端维护了一个 `serviceType × status × videoAccept` 的状态矩阵来做路由决策。另外视频问诊需要跳转腾讯云小程序，图文问诊在原生room页面，这本身就是前端要处理的差异。
+>
+
+---
+
+### 5.2 架构设计类
+**Q2：为什么用缓存总线而不是 globalData 或 EventBus？**
+
+> 三个原因。第一，小程序 `navigateTo` 保留页面但 `onHide` 时 globalData 持有者可能被回收，而 Storage 持久化。第二，需要 TTL 机制，`wxcache.set` 支持 `expireSeconds`，globalData 做不到。第三，问诊流程跨5个页面，EventBus 要维护复杂订阅关系，而缓存总线每个页面只关心 key 不关心谁写的。
+>
+
+**追问：缓存总线有没有踩过坑？**
+
+> 有。postradecode 最初在 `onShow` 生成，每次页面显示都覆盖 UUID，埋点关联断裂。修复是移到 `onLoad`。另一个是 `CACHE_lbx_userinfo` 登录后写入但退出时没清理，切账号后读到旧数据。还有 `wxcache.get` 返回空字符串而非 null，调用方如果用 `if(value)` 判断会误处理。
+>
+
+---
+
+**Q3：WebSocket 和 HTTP 轮询怎么协调？**
+
+> 双通道是演进结果。WebSocket 用于实时消息，HTTP 轮询用于状态变更。协调靠 `is_poll` 标志位——WebSocket 收到事件就中止轮询。消息防重靠 `msgId` 去重。断线重连后调 `getChatInfo()` 全量拉取历史消息补缺口。设计上是"WebSocket实时推 + 进入时全量拉"的组合。
+>
+
+**追问：重连期间消息会丢吗？**
+
+> 不会。重连后 `_register` 重新注册双通道，`getChatInfo()` 全量拉取最新消息列表，不是增量同步。所以断线期间的消息会通过 HTTP 补回来。
+>
+
+---
+
+**Q4：为什么用双 HTTP 客户端（request.js + requestNew.js）？**
+
+> 历史原因。`request.js` 对接老 PHP 接口，`requestNew.js` 对接新 Java 微服务。接口迁移应该有 deadline，但业务优先级导致双轨运行。理想状态是统一到一个客户端。
+>
+
+---
+
+### 5.3 核心流程类
+**Q5：支付流程为什么分 payQuery 和 payParems 两步？**
+
+> 幂等设计。payQuery 先查订单是否已支付——用户可能支付成功但网络超时，或返回后重新点击。直接调 payParems 会触发微信"订单已支付"错误。三个走向：已支付→进诊室，未支付→发起支付，异常→取消并清理。
+>
+
+**追问：payQuery 失败怎么处理？**
+
+> 调 `cancelVisits()` 取消订单并清理状态——包括4个定时器、页面缓存、商城订单状态同步。避免脏数据影响下次提交。
+>
+
+---
+
+**Q6：七步校验链为什么这样拆分？**
+
+> "快速失败 + 明确错误源"。每步失败有独立提示，用户精确定位问题。关键设计是 GIO 埋点放在最后——只有全部通过才上报，确保漏斗数据准确。
+>
+
+---
+
+**Q7：AI问卷的7种题型怎么处理？**
+
+> `addButSubmit()` 中 switch-case 按 `subjectType` 分发，每种题型独立处理校验、提交字段、渲染。关键区分是 `medicineString`（药品类）和 `answer`（文本类）两个字段。中药方额外携带 `chineseDrugState` 和 `dosage`。
+>
+
+**追问：新增题型怎么办？**
+
+> 只需添加一个 case，不影响其他题型。校验/提交/渲染逻辑内聚在 case 块内。
+>
+
+---
+
+### 5.4 边界与异常类
+**Q8：401死循环防护具体怎么实现？**
+
+> 模块级 `res401` 标志位。第一个 401 触发登录刷新并设标志，后续 401 看到标志就不重复触发。刷新完成后重试。
+>
+
+**追问：两个请求同时401会怎样？**
+
+> 第一个设 `res401=true` 并刷新，第二个看到 true 直接重试（带旧token），会再次401 但不会再次触发刷新，走到 catch 提示用户。所以"死循环"防住了，并发401的第二个请求可能失败一次。
+>
+
+**追问：有没有考虑用请求队列？**
+
+> 理论上更优雅，但小程序场景并发请求少（用户操作串行），收益不大。当前方案"防住死循环 + 失败重试一次"已满足需求。不为假设的未来做过度设计。
+>
+
+---
+
+**Q9：定时器泄漏怎么排查和预防？**
+
+> CR 人工检查为主。方法：搜所有 `setInterval` 调用，追踪清理路径。规范是每个定时器必须有对应的 `clearInterval`，在 `onUnload` 或业务取消时调用。`CancelPolling()` 中把变量置 null，防止重复调用报错。
+>
+
+---
+
+**Q10：视频跳转腾讯云小程序，返回后状态怎么同步？**
+
+> 跳转前把 demandId 和 accountSig 写入缓存，返回时在 `room.js` 的 `onShow` 中调 `getDiagnosisInfo()` 检查最新状态。用服务端状态而非客户端状态做决策，避免跨小程序通信的不可靠性。
+>
+
+---
+
+### 5.5 埋点与数据类
+**Q11：GrowingIO 埋点为什么不一开始就抽象？**
+
+> 埋点需求跟业务迭代走。第一版只需几个事件，抽象反而增加认知成本。当事件增长到18个、公共字段增长到6个时，重复代码太多，才值得抽离。"先让它工作，再让它整洁。"
+>
+
+**追问：数据质量怎么监控？**
+
+> 两个手段。GrowingIO 后台"事件验证"功能配置 schema 后字段缺失会告警。另外自建18个事件（buriedDatapoints.js）与 GrowingIO 交叉比对——自建用后端接口上报，GrowingIO 用 SDK 上报，两条通道互为备份。
+>
+
+---
+
+### 5.6 工程协作类
+**Q12：CR 中发现的高频问题有哪些？**
+
+> 三个。一是魔法数字——`if(status === 2)` 应该用常量。二是缓存 key 大小写不一致——`CACHE_lbx_userinfo` vs `CACHE_lbX_userinfo`。三是空 catch 块——`catch(e) {}` 吞掉异常无法排查。
+>
+
+**追问：CR 标准是什么？**
+
+> 三层。必须修：空 catch、未清理定时器、未处理异步错误。建议修：重复代码、过深嵌套。不强制：命名风格偏好。
+>
+
+---
+
+### 5.7 反思与改进类
+**Q13：如果重新设计，你会改什么？**
+
+> 三个改动。第一，状态管理——用状态机替代缓存总线，问诊流程的状态转移是有限的，状态机比散落的 if-else 更可维护。第二，HTTP 客户端统一——消除双轨运行。第三，拆分 `inquiry.js`（1191行）和 `room.js`（1206行）——拆成 service 层、state 层、view 层。但小程序框架下组件化方案有限，这是框架的局限。
+>
+
+**追问：最大的技术债是什么？**
+
+> inquiry.js 和 room.js 的职责混合——UI、业务逻辑、状态管理、网络通信全在一起。但在业务不确定性高的早期，过度设计反而浪费。关键是识别哪些债在"利滚利"，优先还。
+>
+
+---
+
+**Q14：最有成就感的一件事？**
+
+> 视频问诊接入。要对接腾讯云实时音视频SDK，但小程序不允许直接集成原生插件，只能跳转腾讯云独立小程序。难点在状态同步——用户返回后要知道通话是否正常结束。最终方案是跳转前写缓存，返回时查服务端状态做决策，用服务端状态而非客户端状态避免跨小程序通信不可靠性。
+>
+
+---
+
+## 附录：关键文件索引
+| 文件 | 行数 | 职责 |
+| --- | --- | --- |
+| `app.js` | 215 | 入口、场景路由、全局数据 |
+| `580api.js` | 279 | 50+ 接口端点定义 |
+| `config.js` | 53 | 多环境配置 |
+| `pages/index/index.js` | 470 | 首页、门店解析、医生列表 |
+| `pages/inquiry/inquiry.js` | 1191 | 问诊提交、支付、轮询、取消 |
+| `pages/room/room.js` | 1206 | 诊室、聊天、AI问卷、视频 |
+| `utils/socket.js` | 201 | WebSocket 客户端 |
+| `utils/requestNew.js` | 174 | HTTP 客户端（新） |
+| `utils/request.js` | — | HTTP 客户端（旧） |
+| `utils/newLogin.js` | 163 | 登录编排 |
+| `utils/wxcache.js` | 110 | 带TTL的缓存封装 |
+| `utils/wxapi.js` | 781 | 40+ 微信API Promise封装 |
+| `utils/gioTrack.js` | 72 | GrowingIO 埋点封装 |
+| `utils/buriedDatapoints.js` | 232 | 自建埋点（18事件） |
+| `utils/ossUpload.js` | 105 | OSS直传 |
+| `utils/commonRequest.js` | 38 | 协议签署 |
+

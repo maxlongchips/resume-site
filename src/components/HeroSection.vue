@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import gsap from 'gsap'
-import { personal, stats } from '../data/content'
+import { useResumeStore } from '../stores/resume'
+
+const store = useResumeStore()
+const { personal, stats } = storeToRefs(store)
 
 const heroRef = ref<HTMLElement | null>(null)
 const sloganText = ref('')
@@ -32,7 +36,7 @@ onMounted(() => {
   )
 
   tl.add(() => {
-    const text = personal.slogan
+    const text = personal.value.slogan
     gsap.to(
       { progress: 0 },
       {
@@ -83,10 +87,37 @@ onMounted(() => {
         <div class="font-[var(--font-serif)] text-[42px] font-normal text-[var(--accent)] leading-none mb-1.5">
           {{ stat.value }}
         </div>
-        <div class="font-[var(--font-mono)] text-[10px] text-[var(--text-muted)] tracking-[0.15em] uppercase">
+        <div class="font-[var(--font-mono)] text-[12px] text-[var(--text-muted)] tracking-[0.15em] uppercase">
           {{ stat.label }}
         </div>
       </div>
     </div>
   </section>
 </template>
+
+<style scoped>
+@media (max-width: 768px) {
+  .hero-greeting {
+    font-size: 48px !important;
+  }
+
+  .hero-name-line span:first-child {
+    font-size: 32px !important;
+    letter-spacing: 0.1em !important;
+  }
+
+  .hero-name-line {
+    flex-wrap: wrap;
+    gap: 8px !important;
+  }
+
+  .hero-stats {
+    gap: 24px !important;
+    flex-wrap: wrap;
+  }
+
+  .hero-stats .stat div:first-child {
+    font-size: 32px !important;
+  }
+}
+</style>

@@ -1,17 +1,23 @@
 <!-- src/components/AboutSection.vue -->
 <script setup lang="ts">
-import { ref } from 'vue'
-import { about } from '../data/content'
+import { ref, computed } from 'vue'
+import { useResumeStore } from '../stores/resume'
 import SectionHeader from './SectionHeader.vue'
 import { useScrollReveal } from '../composables/useScrollReveal'
 
+const store = useResumeStore()
 const sectionRef = ref<HTMLElement | null>(null)
 useScrollReveal(sectionRef)
+
+const about = computed(() => ({
+  bio: store.about.map((a) => a.content).join(''),
+  cards: store.aboutCards,
+}))
 </script>
 
 <template>
   <section ref="sectionRef" class="mb-25">
-    <SectionHeader command="cat about.md" section-num="01" />
+    <SectionHeader command="cat about.md" section-num="02" />
 
     <p
       class="text-lg leading-[2] text-[var(--text-dim)] font-light mb-12 max-w-[700px]"
@@ -19,7 +25,7 @@ useScrollReveal(sectionRef)
       v-html="about.bio"
     ></p>
 
-    <div class="grid grid-cols-3 gap-4" data-reveal>
+    <div class="about-cards-grid" data-reveal>
       <div
         v-for="card in about.cards"
         :key="card.label"
@@ -28,7 +34,7 @@ useScrollReveal(sectionRef)
         <div class="font-[var(--font-mono)] text-xl text-[var(--accent)] opacity-60 mb-3">
           {{ card.icon }}
         </div>
-        <div class="font-[var(--font-mono)] text-[9px] text-[var(--text-muted)] tracking-[0.15em] uppercase mb-1.5">
+        <div class="font-[var(--font-mono)] text-[11px] text-[var(--text-muted)] tracking-[0.15em] uppercase mb-1.5">
           {{ card.label }}
         </div>
         <div
@@ -43,6 +49,18 @@ useScrollReveal(sectionRef)
 </template>
 
 <style scoped>
+.about-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+@media (max-width: 768px) {
+  .about-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 :deep(.highlight) {
   color: var(--accent);
   font-weight: 400;

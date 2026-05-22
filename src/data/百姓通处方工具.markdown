@@ -1,0 +1,502 @@
+## 项目全局概览
+**项目名称**：百姓通H5处方开方审方系统（`bxt-h5-prescription`）
+
+**业务定位**：为连锁药店店员提供移动端处方流转工作台——涵盖开具处方、AI拍照识别处方、药师审方、人工调配、复核发药、凭证管理、视频问诊等全流程功能，内嵌于百姓通原生App中运行。
+
+**技术栈**：Vue 3 + TypeScript + Vite + Vant 4 UI + Tailwind CSS + Vuex + vue-router，配套 Aegis 监控、GIO 埋点、腾讯云 COS、TRTC 音视频、WebSocket 实时通信。
+
+**个人角色**：李强（你）提交 **142 个 commit**，占总量 1,044 的 **13.6%**，为项目第 3 高贡献者（前两位为 229、151）。代码规模：102 个 Vue 文件 + 56 个 TS 文件，**3.3MB / 32,593 行**。
+
+---
+
+## 一、核心业务模块
+| 模块 | 解决的问题 |
+| --- | --- |
+| **处方开具/审方** (src/views/prescriptionTool/) | 店员为顾客开处方、药师在线审核处方合规性的核心闭环 |
+| **AI处方识别** (src/views/ai-prescription/) | 拍照上传纸质处方，AI自动识别患者、药品、诊断信息并结构化回填，大幅减少手工录入 |
+| **处方列表/调配复核** (src/views/prescriptionList/, reviewDispenseDetail/) | 处方流转状态跟踪、人工调配药品、复核发药及签章确认 |
+| **电子签章管理** (src/components/SignatureBoard/, hooks/useSignature.ts) | 满足监管合规要求的电子签名录入、上传、校验及灰度控制 |
+| **就诊凭证管理** (src/views/voucherEntry/, voucherList/, voucherDetails/) | 患者就诊凭证（诊断证明等）的影像采集、录入、编辑及历史管理 |
+| **开方问诊** (src/views/consult/) | 对接互联网医院，支持图文/视频问诊，WebSocket实时接收开方结果 |
+| **药品比对** (src/views/prescriptionCompare/, productCompare/) | 院外处方与门店库存药品的匹配比对，辅助店员选品 |
+| **网院提单** (src/views/submitOrder/) | 向互联网医院提交处方申请，扫码录入、医院选择、订单追踪 |
+
+
+---
+
+## 二、技术架构亮点
+### 架构模式
++ **单例平台适配层** (src/utils/platformTool.ts)：通过抽象基类 + iOS/Android/PC 多态实现，封装原生能力（扫码、获取用户信息、视频通话、导航栏控制），H5与Native桥接解耦
++ **Composition API 驱动**：全项目采用 Vue 3 `<script setup>` + Composition API，配合自定义 hooks（useSignature）实现逻辑复用
++ **分层状态管理**：Vuex 按业务模块拆分为 `user`、`aiPrescription` 两个 namespace，AI处方模块的状态（多步骤表单、AI回填映射）独立管理
++ **动态路由API包装器**：Axios 拦截器统一注入 token/app_id、统一错误码白名单处理（0/200），通过 `RequestConfig` 支持请求级 toast 控制
+
+### 性能优化
++ **COS并发上传** (src/views/voucherDetails/index.vue:528-611)：多文件上传从串行改为 `Promise.all` 并发，显著缩短凭证影像上传时间
++ **签章墨迹智能裁剪** (src/components/SignatureBoard/index.vue:97-185)：像素级扫描识别墨迹边界，等比例缩放居中至标准尺寸(378×157)，保证签章图像一致性同时减小体积
++ **请求防串扰机制** (src/views/prescriptionList/index.vue:27)：通过递增 `requestId` 序列号，避免分页列表快速切换时数据错乱
++ **操作防重复点击锁** (src/views/reviewDispenseDetail/index.vue:48)：`isActionLoading` 标记 + 关键操作按钮禁用，防止重复提交
++ **轮询优化**：处方审核、签章合成等异步流程从固定30s轮询优化为5s/10s，并增加组件卸载标记防止内存泄漏
+
+### 工程化建设
++ **Vite 构建**：postcss-px-to-viewport 自动适配移动端（375px基准），@vitejs/plugin-legacy 兼容旧浏览器
++ **代码规范**：ESLint + Prettier + Husky pre-commit + lint-staged 自动化检查
++ **监控体系**：Aegis SDK 全量错误监控 + 接口异常上报 + SPA路由PV追踪；GIO SDK 用户行为埋点（处方详情、调配复核、远程审方等关键事件）
++ **灰度发布**：基于字典接口的动态配置，实现签章功能、记录按钮、互联网医院接入的灰度开关控制
++ **Docker + Nginx** 容器化部署，支持 test/test2/uat/production 多环境
+
+---
+
+## 三、个人贡献点分析
+### 独立/主导完成的模块（基于commit频率推断）
+1. **复核发药详情页** (37 commits) — 最核心贡献，涵盖签章集成、调配人选择、复核发药轮询、通过/驳回全流程
+2. **处方详情页** (28 commits) — 从详情跳转路由优化、审核状态联动、处方列表交互
+3. **处方列表页** (20 commits) — Tab筛选、日期跨月限制、分页优化、O2O/B2C订单提示
+4. **凭证管理三连** (voucherList 10 + voucherEntry 9 + voucherDetails 6) — 影像采集、编辑、COS并发上传全链路
+5. **签章体系** — 画板组件（墨迹裁剪算法）、hooks封装、灰度控制、强制校验、上传接口对接
+
+### 值得提及的复杂方案
++ **签章墨迹自动裁剪居中算法**：遍历canvas像素矩阵定位墨迹BoundingBox → 按安全边距等比缩放 → 居中绘制到固定尺寸(378×157)，解决用户签名大小/位置不一致导致的签章图像合规问题
++ **调配/复核人员智能分配逻辑**：支持自签名自动回填、允许选他人、无可用人员提示阻断、签章后自动重载列表，覆盖多种业务场景
++ **处方列表请求防串扰**：高频切换Tab/日期时通过序列号校验，丢弃过期响应，避免列表数据对不上查询条件
++ **WebSocket + 轮询双通道**：WebSocket接收开方实时结果，同时轮询复核发药签章合成状态，组件卸载时清理定时器避免内存泄漏
+
+### 代表性Bug修复
++ 580网院首诊医院字段漏传导致开方失败
++ 已闭店门店被错误匹配为默认门店，优化过滤逻辑
++ 凭证照片10MB无大小限制，补充前端校验
++ 已过期线下处方判断条件错误（来源值0→1）
++ App退出逻辑修复
+
+---
+
+## 四、数据指标
+| <font style="background-color:#FFFFFF;">指标</font> | <font style="background-color:#FFFFFF;">数值</font> |
+| --- | --- |
+| <font style="background-color:#FFFFFF;">项目总代码量</font> | <font style="background-color:#FFFFFF;">32,593 行 (102 Vue + 56 TS)</font> |
+| <font style="background-color:#FFFFFF;">个人 commit</font> | <font style="background-color:#FFFFFF;">142 次（项目第3，占比13.6%）</font> |
+| <font style="background-color:#FFFFFF;">个人净增代码（估算）</font> | <font style="background-color:#FFFFFF;">约 20,000+ 行</font> |
+| <font style="background-color:#FFFFFF;">独立维护的核心页面</font> | <font style="background-color:#FFFFFF;">6+ 个（复核发药/处方详情/处方列表/凭证录入/凭证详情/凭证历史）</font> |
+| <font style="background-color:#FFFFFF;">自主开发的公共组件</font> | <font style="background-color:#FFFFFF;">SignatureBoard 签章画板、useSignature hook、GIO埋点封装、dict工具</font> |
+| <font style="background-color:#FFFFFF;">接入的互联网医院</font> | <font style="background-color:#FFFFFF;">定西网院、580网院等多家</font> |
+| <font style="background-color:#FFFFFF;">性能优化项</font> | <font style="background-color:#FFFFFF;">COS串行→并发、轮询30s→5s、签章智能裁剪</font> |
+
+
+---
+
+## 五、简历最值得写的 7 个亮点
+### 1. 处方全流程状态机与人工调配/复核体系
+**做了什么**：主导设计并实现了处方从审核→调配→复核→发药的全流程状态管理系统，包括处方列表多维度筛选（Tab状态/日期跨月控制）、人员智能分配逻辑（自签自动回填/可选他人/无可用人员阻断）、O2O/B2C订单差异化提示。
+
+**技术**：Vue 3 Composition API + Vuex 状态管理 + 请求序列号防串扰机制
+
+**解决了什么问题**：将原本分散的处方处理流程统一为可追溯的状态机，店员操作效率显著提升，异常状态（驳回/过期/无签章）均有明确引导。
+
+---
+
+### 2. 电子签章系统：从画板到合规的全链路实现
+**做了什么**：封装 SmoothSignature 签名画板组件，实现墨迹自动裁剪居中算法（像素级BoundingBox检测 + 等比缩放至378×157标准尺寸），设计灰度开关控制签章功能分阶段放量，编写 `useSignature` hook 统一签章校验拦截逻辑。
+
+**技术**：Canvas像素矩阵分析、smooth-signature、FormData上传、字典接口灰度配置
+
+**解决了什么问题**：满足药品监管对电子签章的合规要求（固定尺寸、清晰可辨），通过灰度控制降低了新功能上线风险。
+
+---
+
+### 3. 凭证影像采集与并发上传优化
+**做了什么**：从零搭建就诊凭证影像录入、编辑、查看功能，将 COS 文件上传从串行改为 `Promise.all` 并发模式，大幅缩短多图上传耗时。
+
+**技术**：腾讯云COS SDK、cos-js-sdk-v5、Promise.all 并发控制、FormData 构建
+
+**解决了什么问题**：配合医保监管要求实现对患者诊断证明等凭证的数字化管理，上传体验从逐张等待优化为批量并发。
+
+---
+
+### 4. 多平台Native桥接层的设计与实现
+**做了什么**：设计 `BasePlatform` 抽象基类 + `AndroidP/IosP/PCP` 策略实现，封装扫码、获取门店用户信息、视频通话、导航栏控制等原生能力，使所有业务代码与平台无关。
+
+**技术**：抽象工厂/策略模式、TypeScript interface、Native JSBridge
+
+**解决了什么问题**：H5内嵌在百姓通App中运行，通过统一平台适配层屏蔽了iOS/Android/PC三端差异，业务代码零修改即可跨端运行。
+
+---
+
+### 5. 数据埋点与监控体系建设
+**做了什么**：封装 GIO SDK（`trackEvent`/`setGeneralProps`/`generateUUID`），为处方全流程（远程审方、调配、复核发药、问诊结束）添加精准埋点；集成 Aegis SDK 实现全量错误监控、接口异常上报、SPA路由PV追踪。
+
+**技术**：GrowingIO SDK、Aegis SDK、JSON序列化异常自上报
+
+**解决了什么问题**：从零构建了用户行为分析和异常监控体系，使产品/运营可量化评估处方流转转化率，线上问题可追溯。
+
+---
+
+### 6. 处方审核策略与人脸核验流程
+**做了什么**：实现审方策略引擎（医保类型/金额/处方来源多维判断），接入人脸识别验证流程，WebSocket 实时接收审方结果，轮询机制优化从30s降至5s。
+
+**技术**：WebSocket、轮询控制、鉴权中间件、TRTC 实时音视频
+
+**解决了什么问题**：符合药品流通监管对药师审方+人脸认证的合规要求，审核等待时间从30s降至5s，用户体验显著提升。
+
+---
+
+### 7. 灰度发布与动态配置系统
+**做了什么**：编写 `dict` 字典工具函数，通过后端配置接口动态控制签章功能、记录按钮、互联网医院接入的灰度开关，实现功能的分阶段放量和快速回滚。
+
+**技术**：字典接口 JSON 解析、feature flag 模式、安全默认值兜底
+
+**解决了什么问题**：避免了新功能全量上线的风险，签章、医院接入等关键功能可做到按门店/按用户灰度，出问题时后端一键关闭。
+
+
+
+
+
+负责人视角：
+
+## 补充分析：项目负责人视角的深层亮点
+### 1. AI处方的策略模式表单引擎
+这不是一个硬编码的多步表单。项目定义了一套**声明式表单策略引擎**：
+
++ 每个步骤（患者信息 → 药品选择 → 诊断录入 → 配药）实现 `StepStrategy` 接口（types.ts:187），包含 `layout`、`getConfig()`、`validate()`
++ `DynamicForm` 组件（components/DynamicForm.vue）根据配置动态渲染 input/radio/select/medicine-selector/date 五种控件，**新增步骤无需改UI代码**
++ 字段可见性由 `ifVisible` 函数控制（如中药方才显示"副数"字段），校验逻辑支持中西药差异化规则
++ 药品选择器 `MedicineSelector` 支持搜索、多选、分页加载，诊断选择器支持 Tag 标签形式添加/删除，上限5个
+
+**简历表述**：设计并实现了一套声明式表单策略引擎，将多步骤AI处方录入流程抽象为可配置的策略模式，支持中西药方差异化表单校验与动态字段渲染，新增业务步骤无需修改UI层代码。
+
+---
+
+### 2. 通用轮询框架
+utils.ts:303-376 中的 `pollUntilResolved` 是一个设计良好的通用轮询工具：
+
++ 支持超时自动中断 + 错误自动忽略继续轮询
++ 独立定时器 + 立即触发首次请求，无需等待间隔
++ 被开方结果查询（5s间隔）、签章合成检测等多场景复用
++ 与 WebSocket 实时通道形成**双通道互补**：WebSocket 主通道 + 轮询兜底，确保消息不丢失
+
+**简历表述**：封装通用轮询框架 `pollUntilResolved`，支持超时中断与自动重试，与 WebSocket 实时通道组成双通道消息保障机制，在处方开方结果同步等关键场景实现消息零丢失。
+
+---
+
+### 3. 多平台Native桥接的完整适配层
+这不仅是一个简单的 if-else 平台判断（bxtNative/）：
+
+| <font style="background-color:#FFFFFF;">平台</font> | <font style="background-color:#FFFFFF;">实现</font> | <font style="background-color:#FFFFFF;">关键能力</font> |
+| --- | --- | --- |
+| `<font style="background-color:#FFFFFF;">basePlatform.ts</font>` | <font style="background-color:#FFFFFF;">抽象基类</font> | <font style="background-color:#FFFFFF;">定义8个抽象方法（扫码、用户信息、导航栏、Token、视频通话等）</font> |
+| `<font style="background-color:#FFFFFF;">iosP.ts</font>` | <font style="background-color:#FFFFFF;">iOS适配</font> | <font style="background-color:#FFFFFF;">JSBridge</font><font style="background-color:#FFFFFF;"> </font>`<font style="background-color:#FFFFFF;">window.bxt</font>`<br/><font style="background-color:#FFFFFF;"> </font><font style="background-color:#FFFFFF;">注入，非百姓通环境的 mock fallback</font> |
+| `<font style="background-color:#FFFFFF;">androidP.ts</font>` | <font style="background-color:#FFFFFF;">Android适配</font> | <font style="background-color:#FFFFFF;">独立的 JSBridge 协议</font> |
+| `<font style="background-color:#FFFFFF;">pcP.ts</font>` | <font style="background-color:#FFFFFF;">PC调试</font> | <font style="background-color:#FFFFFF;">全量 mock 数据，支持本地开发无需真机</font> |
+| `<font style="background-color:#FFFFFF;">platformTool.ts</font>` | <font style="background-color:#FFFFFF;">单例工厂</font> | <font style="background-color:#FFFFFF;">UA检测自动选择平台，</font>`<font style="background-color:#FFFFFF;">getUserInfo()</font>`<br/><font style="background-color:#FFFFFF;"> </font><font style="background-color:#FFFFFF;">封装异步获取+JSON解析</font> |
+
+
+设计亮点：每个平台实现都有 `isBxtEnv()` 检测，非百姓通环境自动降级为 mock 数据，保证开发调试体验；视频通话状态机通过 `currState` 追踪通话生命周期（0失败/1成功/-1进行中），避免重复上报。
+
+**简历表述**：设计多平台Native桥接抽象层（策略模式 + 单例工厂），封装扫码、用户认证、视频通话、导航栏控制等8类原生能力，实现 iOS/Android/PC 三端一套代码，非Native环境自动mock降级保障开发调试效率。
+
+---
+
+### 4. 多级Token认证链与门店匹配
+用户认证不是简单的"登录拿Token"，而是一条4步链式调用（tribunal/tools.ts:148-201）：
+
+```plain
+百姓通票据(ticket, 几分钟有效) 
+  → 置换token(24h有效) + 人资编码(rzCode) 
+  → 查询门店列表 
+  → deptId匹配默认门店(过滤已闭店)
+```
+
+任何一步失败都有明确的错误提示，且 `userAuthInit` 支持业务回调注入，授权流程与业务逻辑解耦。
+
+---
+
+### 5. 人脸识别的递归重试闭环
+tribunal/tools.ts:211-296 中的 `checkFaceVerification` 实现了一个完整的**人脸认证状态机**：
+
++ 先查接口判断是否需要人脸认证（支持灰度名单）
++ 需要认证 → 弹窗提示 → 调起 Native 人脸比对
++ 成功 → 记录结果到后端 → 更新本地缓存
++ 失败 → 弹窗"再次比对" → 递归调用自身，形成重试闭环
++ 服务异常时默认放行（不阻塞业务流程，降级策略）
+
+**简历表述**：设计人脸识别认证的递归重试机制，包含灰度名单校验、Native人脸比对、成功/失败双回调分支、服务异常降级放行等完整兜底策略，确保合规要求下的用户体验不中断。
+
+---
+
+### 6. Aegis + GIO 双通道监控体系
+项目同时集成了两套监控方案，各司其职：
+
+| 系统 | 用途 | 关键实现 |
+| --- | --- | --- |
+| **Aegis** | 技术监控 | 全局错误捕获（`app.config.errorHandler`<br/>）、接口异常上报（按`bizSuccess`<br/>判断）、SPA路由PV、JSON序列化异常自上报 |
+| **GIO** | 业务埋点 | 通用属性一次设置全程携带、UUID生成器、事件级属性覆盖机制 |
+
+
+use-aegis-web-sdk.js 中值得注意的细节：`retCodeHandler` 实现了业务状态码级别的接口异常判断（而非仅HTTP状态码），`SDK_JSON_STRINGIFY_ERROR` 事件实现了埋点SDK自身的异常监控（监控的监控）。
+
+---
+
+### 7. 处方药品对品匹配系统
+prescriptionCompare 模块实现了一套院外处方药品与门店库存的**逐项比对工作流**：
+
++ 三态模型：`pending`（待对品）→ `completed`（已完成）→ `unmatchable`（暂无配对）
++ 进度条实时反馈（已完成数/总数）
++ 批号级别精细匹配：每个药品可展开多个批号，各自记录数量
++ 从比对结果直接跳转"单品比对"详情页（productCompare）
+
+**简历表述**：实现处方药品与门店库存的逐项比对系统，支持批号级精细匹配与三态进度追踪，解决院外处方药与门店SKU不一致的匹配效率问题。
+
+---
+
+### 8. 双保险去重机制
+项目中两处体现了细致的并发/重复防护设计：
+
++ **请求防串扰**（prescriptionList:27）：通过递增 `requestId` 序列号，快速切换筛选条件时丢弃过期响应
++ **操作防重复点击**（reviewDispenseDetail:48）：`isActionLoading` 锁 + 按钮 disabled 绑定，防止调配/复核关键操作被重复提交
++ **组件卸载定时器清理**：轮询和WebSocket在 `onUnmounted` 中通过 `isComponentUnmounted` 标记 + `clearInterval` 防止内存泄漏
+
+---
+
+### 汇总：现在你有 12 个可写进简历的亮点
+| <font style="background-color:#FAFAFA;">#</font> | <font style="background-color:#FAFAFA;">亮点</font> | <font style="background-color:#FAFAFA;">关键词</font> |
+| --- | --- | --- |
+| <font style="background-color:#FAFAFA;">1</font> | <font style="background-color:#FAFAFA;">处方全流程状态机（调配/复核/发药）</font> | <font style="background-color:#FAFAFA;">Vue3, Vuex, 状态管理</font> |
+| <font style="background-color:#FAFAFA;">2</font> | <font style="background-color:#FAFAFA;">电子签章系统（墨迹裁剪算法）</font> | <font style="background-color:#FAFAFA;">Canvas, 像素矩阵, 合规</font> |
+| <font style="background-color:#FAFAFA;">3</font> | <font style="background-color:#FAFAFA;">凭证影像采集+并发上传优化</font> | <font style="background-color:#FAFAFA;">COS, Promise.all, FormData</font> |
+| <font style="background-color:#FAFAFA;">4</font> | <font style="background-color:#FAFAFA;">多平台Native桥接适配层</font> | <font style="background-color:#FAFAFA;">策略模式, JSBridge, 单例</font> |
+| <font style="background-color:#FAFAFA;">5</font> | <font style="background-color:#FAFAFA;">GIO+Aegis双通道监控体系</font> | <font style="background-color:#FAFAFA;">埋点, 错误监控, SDK封装</font> |
+| <font style="background-color:#FAFAFA;">6</font> | <font style="background-color:#FAFAFA;">AI处方声明式表单策略引擎</font> | <font style="background-color:#FAFAFA;">策略模式, 动态表单, TS泛型</font> |
+| <font style="background-color:#FAFAFA;">7</font> | <font style="background-color:#FAFAFA;">通用轮询框架 + WebSocket双通道</font> | <font style="background-color:#FAFAFA;">异步, 超时控制, 实时通信</font> |
+| <font style="background-color:#FAFAFA;">8</font> | <font style="background-color:#FAFAFA;">人脸识别递归重试闭环</font> | <font style="background-color:#FAFAFA;">状态机, 灰度控制, 降级策略</font> |
+| <font style="background-color:#FAFAFA;">9</font> | <font style="background-color:#FAFAFA;">多级Token认证链与门店匹配</font> | <font style="background-color:#FAFAFA;">鉴权, 链式调用</font> |
+| <font style="background-color:#FAFAFA;">10</font> | <font style="background-color:#FAFAFA;">处方药品对品匹配系统</font> | <font style="background-color:#FAFAFA;">比对算法, 批号匹配</font> |
+| <font style="background-color:#FAFAFA;">11</font> | <font style="background-color:#FAFAFA;">灰度发布与动态配置系统</font> | <font style="background-color:#FAFAFA;">Feature Flag, 字典接口</font> |
+| <font style="background-color:#FAFAFA;">12</font> | <font style="background-color:#FAFAFA;">双保险去重机制（请求防串扰+操作锁）</font> | <font style="background-color:#FAFAFA;">并发控制, 内存管理</font> |
+
+
+ 
+
+
+
+# 面试深挖问题与回答细节
+基于 lbx-h5-prescription（百姓通H5处方平台）代码库分析整理技术栈：Vue 3 + TypeScript + Vite + Vuex 4 + Vant 4
+
+---
+
+## 一、架构设计类
+### Q1: 为什么在 Vue 3 项目中选择了 Vuex 而不是 Pinia？遇到了什么问题？
+**回答要点：**
+
++ 项目启动时（2023年初）Pinia 生态尚不成熟，团队对 Vuex 更有经验，选择了 Vuex 4
++ **遇到的坑**：Vuex strict mode 下，通过 `<font style="background-color:rgba(0, 0, 0, 0.05);">mutateState</font>` 通用 mutation 直接修改 state 上的 ref 对象时，会触发深度监听的告警。README 中有明确记录
++ **解决方案**：使用了通用的 `<font style="background-color:rgba(0, 0, 0, 0.05);">mutateState(state, payload)</font>` mutation，通过 `<font style="background-color:rgba(0, 0, 0, 0.05);">Object.assign</font>` 方式合并属性，避免逐个字段写 mutation
++ **反思**：如果重新选型，会选 Pinia——更简洁的 API、更好的 TS 支持、不需要命名空间
+
+### Q2: 项目中有两套 API 层（`<font style="background-color:rgba(0, 0, 0, 0.05);">xxx.ts</font>` 和 `<font style="background-color:rgba(0, 0, 0, 0.05);">xxx-duplicate.ts</font>`），为什么要这样设计？如何保证平滑迁移？
+**回答要点：**
+
++ **背景**：后端在做 API 网关迁移，老网关 `<font style="background-color:rgba(0, 0, 0, 0.05);">/lbx-ms-biz-rp-store</font>` → 新网关 `<font style="background-color:rgba(0, 0, 0, 0.05);">/lbx-ms-prescription-open</font>`，新网关要求请求参数携带 `<font style="background-color:rgba(0, 0, 0, 0.05);">app_id</font>`
++ **策略**：采用**双跑并行**策略而非大爆炸式切换
+    - 旧文件（`<font style="background-color:rgba(0, 0, 0, 0.05);">podium.ts</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">user.ts</font>`）保持对老网关的调用
+    - 新文件（`<font style="background-color:rgba(0, 0, 0, 0.05);">podium-duplicate.ts</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">user-duplicate.ts</font>`）指向新网关，通过 `<font style="background-color:rgba(0, 0, 0, 0.05);">withAppId</font>` 辅助函数自动注入 `<font style="background-color:rgba(0, 0, 0, 0.05);">app_id</font>`
++ **降级方案**：老接口始终保留，如果新网关出问题，组件层面只需改 import 路径即可回退
++ **迁移进度**：已迁移的端点在新文件中，未迁移的仍在旧文件中，逐步推进
+
+### Q3: 你如何设计原生能力（扫码、人脸识别、视频通话）的桥接层？
+**回答要点：**
+
++ **三层抽象**：
+    1. `<font style="background-color:rgba(0, 0, 0, 0.05);">BasePlatform</font>` 抽象类定义统一接口（`<font style="background-color:rgba(0, 0, 0, 0.05);">scanCode</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">getUserInfo</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">getToken</font>` 等）
+    2. `<font style="background-color:rgba(0, 0, 0, 0.05);">AndroidP</font>` / `<font style="background-color:rgba(0, 0, 0, 0.05);">IosP</font>` / `<font style="background-color:rgba(0, 0, 0, 0.05);">PCP</font>` 三个平台实现，封装 `<font style="background-color:rgba(0, 0, 0, 0.05);">window.android.xxx()</font>` 和 `<font style="background-color:rgba(0, 0, 0, 0.05);">window.webkit.messageHandlers.xxx.postMessage()</font>` 的差异
+    3. `<font style="background-color:rgba(0, 0, 0, 0.05);">PlatformTool</font>` 单例 + 工厂模式，根据 `<font style="background-color:rgba(0, 0, 0, 0.05);">navigator.userAgent</font>` 自动检测平台并实例化
++ **额外兜底**：`<font style="background-color:rgba(0, 0, 0, 0.05);">native.js</font>`（500+ 行）作为第二套老桥接层，直接挂在 `<font style="background-color:rgba(0, 0, 0, 0.05);">window</font>` 上供原生调用
++ **iOS vs Android 差异处理**：
+    - iOS 通过 `<font style="background-color:rgba(0, 0, 0, 0.05);">messageHandlers</font>` 异步通信，Android 通过同步方法调用
+    - 返回值字段名不同（如 `<font style="background-color:rgba(0, 0, 0, 0.05);">deptname</font>` vs `<font style="background-color:rgba(0, 0, 0, 0.05);">deptName</font>`），在 `<font style="background-color:rgba(0, 0, 0, 0.05);">getUserInfo</font>` 中做了字段映射归一化
++ **调试支持**：PC 端用 `<font style="background-color:rgba(0, 0, 0, 0.05);">PCP</font>` mock 类，可以在浏览器中模拟所有原生能力
+
+---
+
+## 二、复杂业务实现类
+### Q4: 处方详情页是整个业务的核心页面，1737 行代码。你是如何管理这种复杂的状态机的？
+**回答要点：**
+
++ **多角色多状态状态机**：页面涉及 3 个角色（医生、药师、店员）× 多种状态（待确认、待问诊、开方成功/失败、审方通过/驳回、远程审方中、已过期），组合出约 15+ 种 UI 状态
++ **设计思路**：
+    - **状态驱动 UI**：所有状态判断收敛到 computed 属性（`<font style="background-color:rgba(0, 0, 0, 0.05);">showSuccess</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">showError</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">bottomOptBtnGroup</font>` 等），模板中只做 `<font style="background-color:rgba(0, 0, 0, 0.05);">v-if</font>` 判断，不写逻辑
+    - **按钮组动态生成**：`<font style="background-color:rgba(0, 0, 0, 0.05);">bottomOptBtnGroup</font>` computed 根据角色 + 状态 + 渠道类型，动态返回应显示的按钮数组（含文字、事件、样式），模板用 `<font style="background-color:rgba(0, 0, 0, 0.05);">v-for</font>` 渲染
+    - **操作锁**：`<font style="background-color:rgba(0, 0, 0, 0.05);">isActionLoading</font>` 作为互斥锁，防止审核通过/驳回重复提交
++ **渠道差异化**：O2O/B2C/粤医保/三品堂/国家处方流转平台 各有不同的按钮显示和文案规则，通过 `<font style="background-color:rgba(0, 0, 0, 0.05);">channelType</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">medInsureType</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">billManagement</font>` 等字段组合判断
++ **处方图片优先级链**：`<font style="background-color:rgba(0, 0, 0, 0.05);">dispenseStatus === 20</font>`（调配完成）→ `<font style="background-color:rgba(0, 0, 0, 0.05);">pharmacistCheckStatus === 20</font>`（药师已审核）→ 原始处方图片，确保展示最新、最权威的签章版本
+
+### Q5: 为什么同时用了 WebSocket 和 HTTP 轮询？它们之间如何协同？
+**回答要点：**
+
++ **双重保障机制**：WebSocket 是主通道，HTTP 轮询（5 秒间隔）是 fallback
+    - WebSocket 负责接收医生开方结果（`<font style="background-color:rgba(0, 0, 0, 0.05);">doctorCheckStatus</font>` 变更）
+    - 轮询调用 `<font style="background-color:rgba(0, 0, 0, 0.05);">getInfoProcess</font>` 接口作为兜底，防止 WebSocket 断开或消息丢失
++ **协同方式**：两者并行运行，谁先拿到结果谁触发状态更新，通过 Vuex `<font style="background-color:rgba(0, 0, 0, 0.05);">consultWSResult</font>` 统一存储结果，watcher 监听变化触发 UI 更新
++ **WebSocket 实现细节**：
+    - 使用 `<font style="background-color:rgba(0, 0, 0, 0.05);">tools-vue3</font>` 的 `<font style="background-color:rgba(0, 0, 0, 0.05);">WebSocketBean</font>` 封装，自带重连机制（3 秒间隔）
+    - 心跳 3 秒一次
+    - WS URL 前缀通过字典接口动态获取（支持灰度），失败时降级到环境变量
++ **远程审方的独立轮询**：EPS 远程审方有另一套独立的 5 秒轮询（`<font style="background-color:rgba(0, 0, 0, 0.05);">getInfoForBxt</font>`），通过 `<font style="background-color:rgba(0, 0, 0, 0.05);">localStorage</font>` 持久化轮询状态（key: `<font style="background-color:rgba(0, 0, 0, 0.05);">AUDITING_{id}</font>`），页面刷新后自动恢复
++ **优化**：轮询间隔从 30 秒优化到 5 秒（commit `<font style="background-color:rgba(0, 0, 0, 0.05);">59d1eb9</font>`），提升实时性
+
+### Q6: AI 处方识别模块的策略模式是怎么设计的？
+**回答要点：**
+
++ **背景**：AI 处方是一个 4 步向导（顾客信息→药品选择→诊断→配药），每一步有不同的表单字段、校验规则和按钮文案
++ **策略模式实现**（`<font style="background-color:rgba(0, 0, 0, 0.05);">src/views/ai-prescription/utils.ts</font>`）：
+    - 定义 `<font style="background-color:rgba(0, 0, 0, 0.05);">StepStrategy</font>` 接口：`<font style="background-color:rgba(0, 0, 0, 0.05);">layout</font>`（布局）、`<font style="background-color:rgba(0, 0, 0, 0.05);">nextButtonText</font>`（按钮文案）、`<font style="background-color:rgba(0, 0, 0, 0.05);">getConfig()</font>`（表单字段配置）、`<font style="background-color:rgba(0, 0, 0, 0.05);">validate()</font>`（校验规则）
+    - 每个步骤对应一个策略对象（`<font style="background-color:rgba(0, 0, 0, 0.05);">step1Strategy</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">step2Strategy</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">step3Strategy</font>`）
+    - `<font style="background-color:rgba(0, 0, 0, 0.05);">strategies[step]</font>` 按索引查找
++ **动态表单渲染**：`<font style="background-color:rgba(0, 0, 0, 0.05);">DynamicForm.vue</font>` 组件根据策略返回的配置动态渲染表单（input/radio/select/date/medicine-selector），支持条件显示（`<font style="background-color:rgba(0, 0, 0, 0.05);">ifVisible</font>`）、搜索选项（`<font style="background-color:rgba(0, 0, 0, 0.05);">searchOptions</font>`）
++ **AI 数据到表单的映射**（`<font style="background-color:rgba(0, 0, 0, 0.05);">fillFormDataFromAi</font>` mutation）：
+    - 处理 AI 识别结果中的脏数据：过滤无编码的诊断、截断超过 5 个诊断、医院名称仅在编码存在时才使用
+    - 药品数据做字段映射 + 组合（`<font style="background-color:rgba(0, 0, 0, 0.05);">dosage + dosageUnit</font>` 合并显示）
++ **通用轮询工具**：`<font style="background-color:rgba(0, 0, 0, 0.05);">pollUntilResolved<T></font>` 是一个泛型轮询函数，支持超时 + 定时间隔，用于等待 AI 识别结果
+
+---
+
+## 三、技术难点 & 算法类
+### Q7: 签章画板的墨迹裁剪算法具体是怎么实现的？
+**回答要点：**
+
++ **问题**：用户在手机上横屏手写签名，导出时需要自动裁剪空白区域并缩放到固定尺寸 378×157px
++ **算法步骤**（`<font style="background-color:rgba(0, 0, 0, 0.05);">cropAndResizeToFixedSize</font>` 函数）：
+    1. **像素级扫描**：通过 `<font style="background-color:rgba(0, 0, 0, 0.05);">getImageData</font>` 遍历 Canvas 每个像素的 Alpha 通道，找到墨迹的 Bounding Box（minX, minY, maxX, maxY）
+    2. **空白画布检测**：如果所有像素 Alpha 都为 0（完全没写字），直接返回原图，不做裁剪
+    3. **等比缩放**：计算 `<font style="background-color:rgba(0, 0, 0, 0.05);">scale = min(availableW / cropW, availableH / cropH)</font>`，以不溢出任一维度为准
+    4. **安全边距**：上下左右各留 10px padding，防止签名顶到边缘
+    5. **居中绘制**：创建离屏 Canvas 378×157，计算偏移量 `<font style="background-color:rgba(0, 0, 0, 0.05);">dx = (targetW - drawW) / 2</font>`，将裁剪区域居中绘制
++ **横屏适配**：整个 UI 通过 CSS `<font style="background-color:rgba(0, 0, 0, 0.05);">transform: rotate(90deg)</font>` 旋转 90 度，提示文字也同步旋转，适配用户横握手机的书写姿势；导出前先调用 `<font style="background-color:rgba(0, 0, 0, 0.05);">getRotateCanvas(-90)</font>` 转回正向
++ **高清屏适配**：Canvas 初始化时 `<font style="background-color:rgba(0, 0, 0, 0.05);">scale: window.devicePixelRatio</font>`，保证 Retina 屏上无锯齿
++ **内存管理**：关闭弹窗时手动置空 `<font style="background-color:rgba(0, 0, 0, 0.05);">signature = null</font>`，移除 `<font style="background-color:rgba(0, 0, 0, 0.05);">touchstart</font>` 事件监听，并由父组件通过 `<font style="background-color:rgba(0, 0, 0, 0.05);">removeDOM</font>` 回调销毁 DOM 节点，防止内存泄漏
+
+### Q8: 并发上传文件到腾讯云 COS 是怎么优化的？
+**回答要点：**
+
++ **优化前**：多文件串行上传，一个接一个（`<font style="background-color:rgba(0, 0, 0, 0.05);">for + await</font>`），总耗时 = 单个耗时 × 文件数
++ **优化后**（commit `<font style="background-color:rgba(0, 0, 0, 0.05);">e007cf5</font>`）：
+    - 先用 `<font style="background-color:rgba(0, 0, 0, 0.05);">handleFileUpload</font>`**并行**获取每个文件的 COS 临时凭证（独立接口，互不依赖）
+    - 获取凭证后通过 `<font style="background-color:rgba(0, 0, 0, 0.05);">Promise.all(uploadTasks)</font>` 并发上传所有文件
+    - 每个文件独立跟踪上传状态（`<font style="background-color:rgba(0, 0, 0, 0.05);">uploading</font>` / `<font style="background-color:rgba(0, 0, 0, 0.05);">success</font>` / `<font style="background-color:rgba(0, 0, 0, 0.05);">failed</font>`），单个失败不影响其他文件
++ **效果**：N 个文件上传时间从 O(N) 降为 O(1)，文件越多效果越明显
+
+---
+
+## 四、工程质量 & 稳定性类
+### Q9: 灰度发布 / 功能开关是怎么实现的？
+**回答要点：**
+
++ **方案**：基于后端字典接口的配置驱动灰度，无需发版即可控制功能开关
++ **实现**（`<font style="background-color:rgba(0, 0, 0, 0.05);">src/utils/dict.ts</font>`）：
+    - `<font style="background-color:rgba(0, 0, 0, 0.05);">getDictJsonValue<T>(dictCode, dictLabel, defaultValue)</font>` 泛型函数
+    - 从后端字典表获取 JSON 配置，安全解析（将单引号替换为双引号再 JSON.parse）
+    - 解析失败或数据为空时返回 `<font style="background-color:rgba(0, 0, 0, 0.05);">defaultValue</font>`，确保不会因配置异常导致业务崩溃
++ **应用场景**：
+    - 签章功能：通过字典 `<font style="background-color:rgba(0, 0, 0, 0.05);">STORE</font>` / `<font style="background-color:rgba(0, 0, 0, 0.05);">SIGNATURE_GRAY</font>` 判断全量开放还是灰度开放
+    - WebSocket URL 前缀：通过字典 `<font style="background-color:rgba(0, 0, 0, 0.05);">STORE</font>` / `<font style="background-color:rgba(0, 0, 0, 0.05);">WEBSTOCK_URL</font>` 动态下发，失败时降级到 `<font style="background-color:rgba(0, 0, 0, 0.05);">.env</font>` 环境变量
+    - 门店匹配：灰度名单校验
++ **优势**：支持按门店/用户维度灰度，出问题可秒级回滚（改字典值即可）
+
+### Q10: 门店匹配逻辑中如何过滤无效门店？
+**回答要点：**
+
++ **问题**：门店列表接口返回了已闭店、注销等无效门店，导致用户选择了无法使用的门店
++ **方案**（commit `<font style="background-color:rgba(0, 0, 0, 0.05);">a504792</font>`）：
+    - 在默认门店匹配时增加过滤条件，排除闭店（`<font style="background-color:rgba(0, 0, 0, 0.05);">status</font>`）、注销等无效状态
+    - 优先匹配最近使用的门店，其次匹配用户所属门店
++ **边界处理**：如果过滤后无可用门店，给出明确提示而非静默失败
+
+### Q11: 如何防止关键操作（审方通过/驳回）的重复提交？
+**回答要点：**
+
++ **操作锁模式**：`<font style="background-color:rgba(0, 0, 0, 0.05);">isActionLoading</font>` ref 作为互斥锁
+    - 点击按钮时先检查 `<font style="background-color:rgba(0, 0, 0, 0.05);">isActionLoading.value</font>`，为 `<font style="background-color:rgba(0, 0, 0, 0.05);">true</font>` 则直接 return 不执行
+    - 操作开始时设为 `<font style="background-color:rgba(0, 0, 0, 0.05);">true</font>`，完成或失败后设为 `<font style="background-color:rgba(0, 0, 0, 0.05);">false</font>`
+    - 按钮 `<font style="background-color:rgba(0, 0, 0, 0.05);">:disabled="isActionLoading"</font>`，从 UI 层面双重保障
++ **人脸验证前置**：审方操作前必须先通过每日人脸验证，验证失败直接阻断，不再进入提交逻辑
++ **对话框 before-close 钩子**：`<font style="background-color:rgba(0, 0, 0, 0.05);">van-dialog</font>` 的 `<font style="background-color:rgba(0, 0, 0, 0.05);">before-close</font>` 回调中，如果 `<font style="background-color:rgba(0, 0, 0, 0.05);">isActionLoading</font>` 为 `<font style="background-color:rgba(0, 0, 0, 0.05);">true</font>`，阻止关闭对话框（`<font style="background-color:rgba(0, 0, 0, 0.05);">done(false)</font>`），防止误操作关闭导致状态不一致
+
+### Q12: 这个项目没有自动化测试，如果要补测试，你会怎么设计测试策略？
+**回答要点：**
+
++ **分层测试策略**：
+    1. **单元测试**（Vitest）：工具函数（`<font style="background-color:rgba(0, 0, 0, 0.05);">pollUntilResolved</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">cropAndResizeToFixedSize</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">dict.ts</font>` 安全解析）、Vuex mutations/actions
+    2. **组件测试**（Vue Test Utils + Vitest）：`<font style="background-color:rgba(0, 0, 0, 0.05);">DynamicForm</font>`（各种 field 类型渲染）、`<font style="background-color:rgba(0, 0, 0, 0.05);">SignatureBoard</font>`（mount/unmount 流程、事件模拟）
+    3. **集成测试**：API 层（mock axios，验证拦截器逻辑、token 过期自动登出、错误 toast 行为）
+    4. **E2E 测试**（Playwright）：关键业务流程——AI 处方全流程、审方通过/驳回流程、签章录入流程
++ **优先级**：先覆盖核心业务路径（审方、AI 处方），再补工具函数和边界 case
++ **挑战**：原生桥接层需要 mock（`<font style="background-color:rgba(0, 0, 0, 0.05);">window.android</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">window.webkit</font>`），可以写一个测试专用 platform mock 注入到 `<font style="background-color:rgba(0, 0, 0, 0.05);">PlatformTool</font>` 中
+
+---
+
+## 五、性能优化类
+### Q13: 这个项目做了哪些性能优化？
+| **优化项** | **手段** | **效果** |
+| :--- | :--- | :--- |
+| 首屏加载 | 路由懒加载（30 个路由全部 `<font style="background-color:rgba(0, 0, 0, 0.05);">() => import()</font>`<br/>） | 首屏 JS 体积大幅减少 |
+| 打包体积 | Vite 按需加载 + Vant 组件按需引入 + `<font style="background-color:rgba(0, 0, 0, 0.05);">unplugin-auto-import</font>`<br/> tree-shaking | 未使用的 API/组件不打包 |
+| 渲染优化 | computed 属性缓存状态判断结果 | 避免模板中重复计算 |
+| 轮询优化 | 间隔从 30s 调整到 5s | 实时性提升 6 倍 |
+| 文件上传 | `<font style="background-color:rgba(0, 0, 0, 0.05);">Promise.all</font>`<br/> 并发上传替代串行 | 多文件上传时间从 O(N) 降为 O(1) |
+| 防重复提交 | 操作锁 + 按钮 disabled | 消除重复请求 |
+| Canvas 渲染 | `<font style="background-color:rgba(0, 0, 0, 0.05);">devicePixelRatio</font>`<br/> 适配 + 离屏 Canvas 裁剪 | 高清屏防锯齿 + 减少主 Canvas DOM 操作 |
+| 静态资源 | Nginx 14 天缓存 `<font style="background-color:rgba(0, 0, 0, 0.05);">location ~* \.(js|css|png|jpg)$</font>` | 二次访问秒开 |
+| Keep-alive | 路由 `<font style="background-color:rgba(0, 0, 0, 0.05);">keepAlive: true</font>`<br/> 缓存页面实例 | 返回时保留滚动位置和表单状态 |
+
+
+---
+
+## 六、项目管理类
+### Q14: 你在这个项目中最大的技术挑战是什么？
+**建议选择：签章功能的完整实现**。理由——涉及多个技术深度点：
+
+1. **Canvas 像素级图像处理**：自己实现墨迹 Bounding Box 检测 + 等比缩放 + 居中裁剪算法
+2. **横屏 UI 适配**：CSS `<font style="background-color:rgba(0, 0, 0, 0.05);">transform: rotate(90deg)</font>` 实现横屏布局，按钮文字、提示水印全部旋转适配
+3. **程序化组件挂载/销毁**：通过 `<font style="background-color:rgba(0, 0, 0, 0.05);">createVNode</font>` + `<font style="background-color:rgba(0, 0, 0, 0.05);">render</font>` 动态创建签章板组件，配合 `<font style="background-color:rgba(0, 0, 0, 0.05);">removeDOM</font>` 回调完成清理
+4. **灰度开关**：字典接口配置驱动，支持全量/灰度两种模式切换
+5. **完整上传链路**：Canvas Base64 → File → FormData → 后端上传，带 loading 状态和错误处理
+6. **内存管理**：手动释放 Canvas 引用、移除事件监听、销毁 DOM，防止 SPA 页面内存泄漏
+
+### Q15: 如果让你重构这个项目，你会怎么做？
+1. **Vuex → Pinia**：更简洁的 API，更好的 TS 类型推导，不需要命名空间
+2. **补测试**：至少覆盖核心业务路径（审方流程、AI 处方流程）
+3. **统一 API 层**：完成网关迁移后删除 `<font style="background-color:rgba(0, 0, 0, 0.05);">-duplicate</font>` 文件，统一到一个 API 模块
+4. **大组件拆分**：`<font style="background-color:rgba(0, 0, 0, 0.05);">prescriptionDetails/index.vue</font>`（1737 行）可拆分为状态横幅、药品列表、操作按钮组、审核对话框等独立组件
+5. **提取通用 Composables**：两套轮询机制可抽象为 `<font style="background-color:rgba(0, 0, 0, 0.05);">usePolling</font>` composable，操作锁可抽象为 `<font style="background-color:rgba(0, 0, 0, 0.05);">useLock</font>`
+6. **TypeScript 严格化**：当前 `<font style="background-color:rgba(0, 0, 0, 0.05);">@typescript-eslint/no-explicit-any: off</font>`，应逐步消除 `<font style="background-color:rgba(0, 0, 0, 0.05);">any</font>` 类型
+7. **错误边界**：添加 Vue `<font style="background-color:rgba(0, 0, 0, 0.05);">onErrorCaptured</font>` 全局错误处理，防止单点错误导致白屏
+8. **移除硬编码的 **`**<font style="background-color:rgba(0, 0, 0, 0.05);">hasToken = true</font>**`：当前路由守卫中 token 检查被硬编码绕过，应恢复为真实的认证校验
+
+---
+
+## 七、开放性问题
+### Q16: 你对医疗/处方业务的复杂度有什么理解？
++ **多角色协作**：医生开方 → 药师审方 → 店员提单 → 患者取药，每个角色有不同权限和操作
++ **合规要求**：人脸验证（药师每日验脸）、电子签章（监管要求）、处方图片存档
++ **渠道多样性**：O2O、B2C、粤医保、国家处方流转平台，各有不同的业务流程和 UI 规则
++ **时效性**：处方当日有效（`<font style="background-color:rgba(0, 0, 0, 0.05);">isExprie</font>` 判断），过期作废
++ **数据隐私**：患者姓名脱敏（只显示首字+星号）
+
+### Q17: H5 内嵌在原生 App 中有哪些坑？
++ **iOS/Android 行为不一致**：JSBridge 调用方式不同（`<font style="background-color:rgba(0, 0, 0, 0.05);">window.android.xxx()</font>` vs `<font style="background-color:rgba(0, 0, 0, 0.05);">window.webkit.messageHandlers.xxx.postMessage()</font>`），返回值字段命名不一致
++ **WebView 兼容性**：不同版本的 WebView 对 CSS/JS 支持有差异，需要通过 `<font style="background-color:rgba(0, 0, 0, 0.05);">@vitejs/plugin-legacy</font>` 做降级
++ **原生导航冲突**：H5 路由跳转 vs 原生返回手势/NavBar，需要在 `<font style="background-color:rgba(0, 0, 0, 0.05);">App.vue</font>` 的返回逻辑中判断是否应该退出 App 还是回退路由
++ **键盘遮挡**：表单输入时原生键盘弹出遮挡输入框（Vant Form 组件自带处理）
++ **调试困难**：线上问题需要依赖 `<font style="background-color:rgba(0, 0, 0, 0.05);">vConsole</font>` 查看日志，无法使用 Chrome DevTools 真机调试
+
+### Q18: 从 commit 记录看你有 142 次提交，你觉得自己的代码风格有什么特点？
++ **细粒度提交**：每个功能点独立 commit，便于 code review 和问题回溯
++ **中英文混合 commit message**：业务描述用中文，技术动词用英文（`<font style="background-color:rgba(0, 0, 0, 0.05);">feat:</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">fix:</font>`、`<font style="background-color:rgba(0, 0, 0, 0.05);">refactor:</font>`）
++ **注重边界处理**：多处体现对空值、异常情况的防御性编程
++ **关注性能**：主动优化轮询间隔、并发上传等性能瓶颈
++ **重视用户体验**：loading 状态、操作锁防重复点击、错误 toast 提示
+
+  
+ 
+
+
+
+

@@ -1,19 +1,21 @@
 <!-- src/components/SkillsSection.vue -->
 <script setup lang="ts">
-import { ref } from 'vue'
-import { skills } from '../data/content'
+import { ref, computed } from 'vue'
+import { useResumeStore } from '../stores/resume'
 import SectionHeader from './SectionHeader.vue'
 import { useScrollReveal } from '../composables/useScrollReveal'
 
+const store = useResumeStore()
 const sectionRef = ref<HTMLElement | null>(null)
 useScrollReveal(sectionRef)
+const skills = computed(() => store.skillGroups)
 </script>
 
 <template>
   <section ref="sectionRef" class="mb-25">
-    <SectionHeader command="cat skills.json" section-num="02" />
+    <SectionHeader command="cat skills.json" section-num="04" />
 
-    <div class="grid grid-cols-2 gap-7" data-reveal>
+    <div class="skills-grid" data-reveal>
       <div
         v-for="group in skills"
         :key="group.title"
@@ -26,6 +28,11 @@ useScrollReveal(sectionRef)
           v-for="skill in group.skills"
           :key="skill.name"
           class="skill-item"
+          role="progressbar"
+          :aria-valuenow="skill.level"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-label="skill.name + ': ' + skill.level + '%'"
         >
           <span>{{ skill.name }}</span>
           <div class="skill-bar">
@@ -41,6 +48,18 @@ useScrollReveal(sectionRef)
 </template>
 
 <style scoped>
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 28px;
+}
+
+@media (max-width: 768px) {
+  .skills-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .skill-group {
   padding: 30px;
   background: var(--surface);
@@ -61,7 +80,7 @@ useScrollReveal(sectionRef)
 
 .skill-group-title {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   color: var(--accent);
   letter-spacing: 0.2em;
   text-transform: uppercase;
@@ -85,7 +104,7 @@ useScrollReveal(sectionRef)
   padding: 8px 0;
   border-bottom: 1px solid var(--border);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-dim);
 }
 

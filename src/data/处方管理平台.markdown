@@ -1,0 +1,674 @@
+> 项目负责人视角 | 基于代码和Git历史的真实分析 | 面试专用
+>
+
+---
+
+## 一、项目介绍
+### 一句话版本（30秒）
+> 为老百姓大药房（全国连锁药店Top1）打造的处方管理平台，管理全国数千家门店的互联网医院对接、处方流转、审方配置和药品合规，覆盖POS终端、百姓通APP、小程序三端渠道。
+>
+
+### 详细版本
+**项目名称**：lbx-web-rp-mng（老百姓处方管理系统）
+
+**业务背景**：老百姓大药房作为全国最大的连锁药店之一，需要将线下门店与互联网医院打通，实现"线上问诊 → 电子处方 → 门店取药"的完整闭环。本系统是这个闭环的**后台管理中枢**，负责：
+
++ 管理门店主数据（ERPID/SAPID/战区/省市区/经营归属）
++ 配置每家门店对接哪些互联网医院、走什么渠道、开什么类型的处方
++ 控制审方规则（自动审方模式、签章管控、POS提单审方）
++ 查询和追踪每一张处方的流转状态
++ 管理诊断编码表、首诊医院名录等基础数据
+
+**技术栈**：Vue 3 + Vuex 4 + Vue Router 4 + Element Plus + SCSS，Vue CLI 5 构建
+
+**团队规模**：6人，我作为整个项目负责人，负责技术方案设计、代码审查、工程化规范建设
+
+**项目周期**：2024.12 ~ 2026.05，约18个月，持续迭代中
+
+**环境部署**：开发 / 测试 / 预发 / 生产 四套环境，独立配置API地址、CAS认证地址、应用ID
+
+---
+
+## 二、核心模块拆解
+### 2.1 业务配置中心（ServiceConfiguration）
+**业务价值**：这是整个系统最核心的模块。每家门店要对接哪些互联网医院、走什么渠道（POS/百姓通/小程序）、开什么类型的处方（西药/中药、医保/非医保）、需要什么合规校验（网院审方/合理用药/医保合规），全在这里配置。可以理解为处方流转的"开关矩阵"。
+
+**核心字段**：
+
+| 配置维度 | 字段 | 说明 |
+| --- | --- | --- |
+| 门店 | storeCode | 关联门店主数据 |
+| 互联网医院 | netHospitalCode | 对接哪家网院 |
+| 业务类型 | medInsureType | 非医保 / 统筹医保 / 非统筹医保 |
+| 处方类型 | drugType | 西药 / 中药 |
+| 问诊类型 | applyType | 图文 / 视频 |
+| 渠道 | channel | POS / 百姓通 / 小程序 |
+| 合规开关 | needNetHospitalCheck, needDrug, needRationalCheck, needYbCheck | 各项校验的开关 |
+| 小程序专属 | isIdCardRequired, isFirstVisitRequired | 仅小程序渠道显示且必填 |
+
+
+**技术含量**：
+
+1. **动态表单校验**：当渠道选择 `MINI_MEMBER`（小程序）时，身份证和初诊信息字段才变为必填。使用 `computed` 动态计算校验规则，而非静态rules对象。这是因为Element Plus的校验器在初始化时绑定，静态rules修改后不会生效。
+2. **互联网医院联动配置**：选择互联网医院后，调用 `getNetHospitalRequiredConfig` 接口获取该医院的必填字段配置。如果返回包含 `isIdCardRequired`，则强制将身份证设为必填且禁用修改（医院要求的合规底线，运营不能关闭）。
+3. **非小程序渠道的字段清洗**：提交时，如果渠道不是小程序，将 `isIdCardRequired` 和 `isFirstVisitRequired` 设为 `null`，避免脏数据写入后端。
+
+**操作链路**：
+
+```plain
+列表查询 → 搜索/筛选 → 修改 → 动态表单校验 → 提交 → 刷新列表
+                      → 日志 → 侧边栏抽屉 → 无限滚动加载
+                      → 导入 → 下载模板 → 上传文件 → 服务端校验 → 提交
+                      → 导出 → Blob下载 → 错误检测 → 保存文件
+                      → 开启/关闭 → 二次确认 → 调用接口 → 刷新列表
+```
+
+---
+
+### 2.2 门店配置（StoreConfiguration）与质量门店配置（QualityStoreConfig）
+**业务价值**：控制每家门店的药事服务规则。
+
+**门店配置**关注的是"能不能开处方"：
+
++ 合理用药检查是否开启
++ 医保合规校验是否开启
++ EPS药师审方 / EPS远程审方 / EPS远程自动审方
++ 诊断库和药品诊断库的绑定
+
+**质量门店配置**关注的是"处方质量怎么把控"：
+
++ 自动审方模式（随机型 / 排班型 / 关闭）
++ 国流处方二次审方
++ POS提单审方管控
++ 签章管控（同一用户控制 / 宽松/严格模式）
++ 是否允许他人调配、复核发药
+
+**技术含量**：
+
+自动审方类型用枚举驱动：
+
+```javascript
+// src/const/StoreConfig.js
+export const enumsTypeReview = {
+  0: "随机型",   // 系统随机分配药师审方
+  1: "排班型",   // 按药师排班表分配
+  2: "关闭",     // 不自动审方
+}
+```
+
+这个枚举在门店配置表单、质量门店配置表单、审计日志三处复用，保证了展示一致性。
+
+---
+
+### 2.3 处方数据查询（Prescriptiondata）
+**业务价值**：查询全量处方流转记录，是运营排查问题的核心入口。
+
+**列表页**支持多维度筛选：处方ID、战区、经营归属、门店（远程搜索+无限滚动）、互联网医院、业务类型、处方类型、问诊类型、端口、时间范围（默认最近3天）。
+
+**详情页**展示处方全貌：
+
++ **业务数据**：处方ID、门店、战区、网院、问诊类型、业务类型、状态、失败原因
++ **处方图片**：支持大图预览
++ **用户数据**：姓名、年龄、性别、孕期状态、诊断
++ **订单数据**：总金额、医保金额、现金金额
++ **药品数据**：药品名称、编码、数量（中西药差异化展示）、批号
++ **违规数据**：违规原因、流程影响
+
+**技术含量**：
+
+1. **医保费用的整数缩放计算**：
+
+```javascript
+const dealMedicareFee = computed(() => {
+    const factor = Math.pow(10, 4) // 放大10000倍
+    const { medicareFee, medSelfFee } = gotoutData || {}
+    if (typeof medicareFee !== 'number' && typeof medSelfFee !== 'number') {
+      return ''
+    }
+    const fee = (Math.round(factor * Number(medicareFee || 0)))
+              + (Math.round(factor * Number(medSelfFee || 0)))
+    return fee / factor
+})
+```
+
+JavaScript浮点运算有精度问题（`0.1 + 0.2 = 0.30000000000000004`）。在医保金额计算中，这种误差会累积。用 `*10000 → 取整 → 加法 → /10000` 的方式，把浮点运算转化为整数运算。保留4位小数是因为医保金额精确到分（2位），多保留2位是为了中间计算不丢精度。
+
+2. **中西药数量差异化展示**：
+
+```javascript
+newval.drugList.forEach((item) => {
+    if (Number(newval.drugType)) {
+        // 中药固定展示剂数
+        item.value = `${item.applyQuantity}`
+    } else {
+        // 西药展示数量+单位
+        item.value = `${item.applyQuantity}${item.drugUnit}`
+    }
+})
+```
+
+中药的 `applyQuantity` 代表剂数（如"3剂"），西药的代表剂量（如"10mg"）。同一个字段，不同业务含义，前端做差异化渲染。
+
+3. **列表与详情的同页切换**：不用路由跳转，用 `v-if` 切换 `showTable` 状态。好处是列表的搜索条件和分页状态保存在组件内存中，返回时不需要重新请求。
+
+---
+
+### 2.4 基础库管理
+#### 门店管理（StoreManagement）
+管理门店主数据：ERPID、SAPID、门店名称、战区、经营归属、省市区、组织编码、省公司ID、业务门店ID、营业状态。
+
+**亮点功能**：ERP ID智能回填——用户输入ERP ID后失焦或按回车，自动调用 `getErpStoreBasicInfo` 接口获取门店全部信息并填充表单，同时级联加载省市区数据。用 `lastErpId` 记录上次请求的值，避免重复请求。
+
+#### 互联网医院管理（InternetManagement）
+只读矩阵视图，按中西药 x 医保/普通 x 三渠道 x 问诊类型交叉展示处方量。用于运营快速掌握各网院的处方流转情况。
+
+#### 诊断表管理（DiagnosticTableManagement）
+管理诊断编码表。每个表有名称和是否可编辑标记。点击进入详情页（particularsmould），管理具体的诊断条目（诊断名称、编码、医保诊断名称/编码），支持批量导入。
+
+#### 首诊医院管理（FirstVisitHospital）
+管理首诊医院名录：医院名称、医院编码、拼音首字母、医保编码。支持CRUD、导入、审计日志。
+
+#### 字典配置（DictionaryConfig）
+系统级字典管理：配置编码、标签、描述、配置值、状态（启动/未启动）。
+
+---
+
+### 2.5 通用组件体系
+#### Tabcom — 表格组件
+所有业务模块复用的核心表格组件，提供：
+
++ 动态列渲染（支持formatter函数和slot插槽）
++ 分页器（每页条数切换、页码跳转）
++ 操作按钮区（导入/导出/新增，通过 `btnfok` prop控制显示哪些）
++ 操作列slot（详情/修改/日志/开启关闭，由各业务模块自定义）
++ 全屏loading状态
+
+```javascript
+// 按钮显示控制：支持字符串和数组两种模式
+const checkBtnShow = (type) => {
+  if (!props.btnfok || props.btnfok === 'oall') return false;
+  if (Array.isArray(props.btnfok)) return props.btnfok.includes(type);
+  return props.btnfok === 'all' || props.btnfok === type;
+}
+```
+
+#### aedFrom — 动态表单容器
+通过 `types` prop切换不同的表单组件，用 `shallowRef` 持有组件引用。父组件通过 `RefChild.value.submit()` 命令式调用子组件的提交方法。
+
+```javascript
+const components = shallowRef();
+watch(() => props.types, (value) => {
+  switch (value) {
+    case "StoreManagement": components.value = StoreManagement; break;
+    case "ServiceConfiguration": components.value = ServiceConfiguration; break;
+    // ...
+  }
+}, { immediate: true });
+```
+
+**为什么用shallowRef**：Vue组件对象本身是复杂的，用 `ref` 做深度代理会有性能开销且无意义——只需要切换组件引用，不需要监听组件内部属性变化。
+
+#### comonImportModal — 导入组件
+支持7种模板的通用导入组件，两步流程：下载模板 → 上传填写好的文件。
+
+导入失败时，服务端返回的错误信息通过 `dangerouslyUseHTMLString: true` 渲染（为了支持 `<br>` 换行），同时对用户数据做XSS转义：
+
+```javascript
+const escapeHtml = (str) => {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+```
+
+#### comonSidebarLog — 审计日志组件
+侧边栏抽屉，支持8种日志类型，每种有独立的字段定义。使用 `v-infinite-scroll` 实现无限滚动加载。
+
+数据驱动渲染：每条日志记录同时携带**渲染组件**（add/edit用addRule组件）和**字段定义**（logFields），通过 `<component :is="item.operateTypeComponent">` 动态渲染。
+
+---
+
+## 三、技术架构亮点
+### 3.1 CAS SSO + 组织权限平台的双通道认证
+**问题**：系统需要对接两套独立的认证体系——CAS（中央认证服务）负责"你是谁"，组织权限平台负责"你能看什么"。且权限平台不缓存登录态，每次都需要重新验证。
+
+**方案**：
+
+```plain
+用户访问URL
+  │
+  ├─ 无ticket/token ──→ CAS重定向(cas.lbxdrugs.com) ──→ 带ticket回调
+  │
+  ├─ 有ticket ──→ createTokenByTicket()换token ──→ 存Cookie
+  │
+  └─ 有authorInfo(CSS平台嵌入) ──→ base64解码取token ──→ 存Cookie
+  │
+  ▼
+router.beforeEach (permission.js)
+  │
+  ├─ findUserInfo() ──→ 获取用户名
+  │
+  └─ findMenuByUserId({appId}) ──→ 获取菜单权限树
+       │
+       └─ parserPermission(asyncRoutes, menu_list)
+            │  递归匹配 route.relativeURL === menu.url
+            │  深拷贝匹配到的路由，递归处理children
+            │
+            └─ router.addRoute() 逐条注入 ──→ 路由表构建完成
+```
+
+支持两条认证路径：
+
+1. **CAS票据模式**：标准CAS SSO流程，URL带ticket时调 `createTokenByTicket` 换token
+2. **CSS平台透传模式**：从 `authorInfo` query参数解码base64获取token（用于嵌入运营平台场景）
+
+权限过滤的核心函数 `parserPermission`：
+
+```javascript
+export function parserPermission(routes, menus) {
+  const tmp_arr = []
+  _.forEach(routes, function(v, i) {
+    _.forEach(menus, function(w, j) {
+      if (v.relativeURL === w.url) {
+        const c_v = deepClone(v)
+        if (c_v.children && c_v.children.length > 0) {
+          c_v.children = parserPermission(c_v.children, menus)
+        }
+        tmp_arr.push(c_v)
+      }
+    })
+  })
+  return tmp_arr
+}
+```
+
+**效果**：权限完全由后端平台管控，前端零硬编码。新增菜单只需在权限平台配置，前端无需发版。
+
+---
+
+### 3.2 双Axios实例的微服务网关适配
+**问题**：后端有两套独立的网关——业务微服务（`/lbx-ms-biz-rp-manage`）和框架级服务（Zuul网关 `msapi.lbxcn.com:31443`），响应格式和鉴权方式不完全一致。
+
+**方案**：维护两个Axios实例，差异化处理：
+
+| 差异点 | request.js（业务） | request_fwk.js（框架） |
+| --- | --- | --- |
+| baseURL | 业务微服务路径 | Zuul网关地址 |
+| appCode header | 有 | 有 |
+| 响应成功判断 | `code !== 0 && code !== 200` | `code !== 0` |
+| "已存在"特殊处理 | 无 | `msg.includes('已存在')` 返回res而非reject |
+| 返回值 | `res.data || res` | `res`（完整响应） |
+
+
+两个实例共享统一的错误码拦截——`1001502` 触发自动登出+CAS重定向：
+
+```javascript
+if (res.code === 1001502) {
+  setTimeout(() => {
+    sessionStorage.clear()
+    window.location.href = process.env.VUE_APP_SYSTEM_CASURL
+      + '/cas/logout?service=' + window.location.href
+  }, 2500) // 延迟2.5秒，让用户先看到错误提示
+}
+```
+
+**效果**：两套后网关的差异被封装在请求层，业务组件无感知。新增接口只需选择对应的实例即可。
+
+---
+
+### 3.3 Composable模式的业务逻辑复用
+**问题**：多个业务模块都需要门店远程搜索、字典下拉、分页状态管理、开启关闭确认等逻辑，如果每个模块都写一遍，代码重复量巨大。
+
+**方案**：在 `utils/comm.js` 中提取了6个Composable函数：
+
+```javascript
+// 门店远程搜索（带三级差异化节流）
+useStoreSelect()
+
+// 战区下拉
+useWarZonSelect()
+
+// 6种业务字典的统一加载器
+useDictSelect(keys)
+
+// 标准分页状态
+usePageMate()
+
+// 开启/关闭二次确认
+useStartMate()
+
+// 通用Excel导出（含Blob错误检测）
+exportXlsx()
+```
+
+以 `useStoreSelect` 为例，使用方式：
+
+```javascript
+const {
+  storeLoading, storeList, scrollDisabled, storeVisible,
+  scrollLoading, storeQuest, scrollLoad
+} = useStoreSelect();
+```
+
+**效果**：每个业务页面只需3-5行代码就能获得完整的门店搜索能力，逻辑统一、行为一致。
+
+---
+
+### 3.4 门店远程搜索的三级差异化节流
+**问题**：el-select的 `remote-method` 和 `v-infinite-scroll` 共用同一个数据源，但"搜索"和"翻页"两种行为对响应速度的要求不同。搜索需要快响应，翻页可以慢一些，正在加载时要更慢防抖。
+
+**方案**：
+
+```javascript
+setTimeout(() => { ... }, scrollDisabled.value ? 100 : storeLoading.value ? 1200 : 800)
+```
+
+| 状态 | 延迟 | 原因 |
+| --- | --- | --- |
+| `scrollDisabled=true`（首次搜索或最后一页） | 100ms | 用户刚输入，需要快速响应 |
+| `storeLoading=true`（正在搜索中） | 1200ms | 避免频繁请求打爆后端 |
+| 其他（翻页加载） | 800ms | 平衡体验和请求频率 |
+
+
+同时，`v-infinite-scroll` 的disabled条件做了三重保护：
+
+```html
+:infinite-scroll-disabled="storeLoading || scrollDisabled ||
+  (!storeVisible && !storeLoading && !scrollDisabled)"
+```
+
+**效果**：搜索体验流畅（100ms响应），翻页不卡顿（800ms），正在加载时不重复请求（1200ms防抖），下拉框关闭后滚动页面不会触发加载。
+
+---
+
+### 3.5 Excel导出的Blob错误检测
+**问题**：当Axios的 `responseType: 'blob'` 时，所有响应都会被当作Blob处理。如果服务端返回的是JSON错误信息而不是Excel文件，它也会是Blob。不处理的话，用户会下载一个包含JSON错误信息的 `.xlsx` 文件，打开后是乱码。
+
+**方案**：
+
+```javascript
+await exportApiFunc({ ...formInline }).then(async (res) => {
+  // 检测Blob是否实际是JSON错误
+  if (res instanceof Blob && res.type === 'application/json') {
+    try {
+      const text = await readFileAsText(res);
+      const data = JSON.parse(text);
+      if (data.code !== 0) {
+        ElMessage({ message: data.message || data.msg || 'Error', type: 'error' });
+        return;
+      }
+    } catch (error) {
+      console.error('Error reading the blob as text:', error);
+      return;
+    }
+  }
+  // 正常文件流处理
+  downloadBlob(res, downFileName);
+})
+```
+
+**效果**：错误场景下不会下载损坏文件，而是正确显示错误提示。这个逻辑后来被提取为通用函数 `exportXlsx`，所有导出功能复用。
+
+---
+
+### 3.6 Git工程化规范建设
+**问题**：项目中期，团队提交风格不统一（有的写中文、有的写英文、有的不写前缀），代码质量参差不齐（console.log残留、未使用的变量）。
+
+**方案**：
+
+1. **Husky + commitlint**：强制conventional commits格式
+
+```javascript
+// commitlint.config.js
+module.exports = {
+  extends: ['@commitlint/config-conventional'],
+  rules: {
+    'type-enum': [2, 'always', [
+      'feat', 'fix', 'docs', 'style', 'refactor',
+      'perf', 'test', 'build', 'ci', 'chore', 'revert'
+    ]],
+  }
+}
+```
+
+2. **ESLint**：Vue 3 + ESLint推荐规则，生产环境禁止console/debugger
+3. **lint-staged**：提交前自动校验变更文件
+
+**效果**：提交历史规范化，从git log可以看到统一的 `feat:` / `fix:` / `refactor:` 前缀，便于生成changelog和追溯问题。
+
+---
+
+### 3.7 组件通信架构
+**问题**：6人团队并行开发多个模块，需要统一的组件通信模式，避免混乱。
+
+**方案**：建立三层通信规范：
+
+| 层级 | 方式 | 适用场景 |
+| --- | --- | --- |
+| 父子组件 | Props + Emits + Expose | 表单弹窗、表格组件 |
+| 跨页面 | URL Query + 条件渲染 | 列表→详情切换 |
+| 全局状态 | Vuex（6个模块） | 用户信息、权限、标签页 |
+
+
+**aedFrom的"壳组件+动态子组件+命令式调用"模式**：
+
+```plain
+ServiceConfiguration.vue（业务页面）
+  │
+  ├─ Props: openadd, lodatitle, types, formId, formData
+  │
+  └─ aedFrom/index.vue（壳组件）
+       │  shallowRef动态切换子组件
+       │
+       └─ ServiceAed/index.vue（表单组件）
+            Expose: submit(), romve()
+            ← 父组件通过 RefChild.value.submit() 调用
+```
+
+**效果**：表单弹窗的逻辑被封装在壳组件中，业务页面只需控制 `openadd` 和 `types` 即可。
+
+---
+
+## 四、Bug修复案例
+### 4.1 运营/质量门店配置导出三次修复
+**现象**：导出功能在不同场景下反复出问题，连续提交了三个fix commit。
+
+**根因**：Blob下载的错误响应处理不当。当服务端返回JSON错误信息时（`type: 'application/json'` 的Blob），之前的代码没有检测这个场景，直接把Blob当文件下载了。
+
+**修复**：
+
+```plain
+b3d8c34 fix：运营门店配置和质量门店配置导出下载修改
+f937fb2 fix：运营门店配置和质量门店配置导出下载修改2
+5e3cfce fix：运营门店配置和质量门店配置导出下载修改3
+```
+
+第一次可能没处理Blob中的JSON错误；第二次可能处理了但 `readFileAsText` 的异步逻辑有问题；第三次才稳定。
+
+**收获**：修复后的逻辑被提取为通用函数 `exportXlsx`，沉淀到 `utils/comm.js`，所有导出功能复用，避免每个模块重复踩坑。**一次修复 → 抽象为通用方案 → 全局复用**。
+
+---
+
+### 4.2 初诊信息字段的逻辑混乱
+**现象**：初诊信息字段的禁用逻辑、默认值、显示条件反复修改，连续三个fix commit。
+
+**根因**：初诊信息字段有三个控制源：
+
+1. 渠道（MINI_MEMBER才显示）
+2. 互联网医院配置（后端返回是否必填）
+3. 用户手动设置
+
+三个控制源的优先级和交互逻辑最初没理清。
+
+**修复**：
+
+```plain
+d45b81c fix: 移除初诊信息字段禁用逻辑，调整默认值为1
+f543d40 fix: 修复初诊信息字段显示问题，移除不必要的覆盖逻辑
+7f9802d fix: 修复AI代码审查问题 - 动态校验规则、XSS防护、isFirstVisitRequired逻辑
+```
+
+**最终方案**：
+
++ `computed` 动态校验规则（仅MINI_MEMBER时添加必填校验）
++ 互联网医院选择时调接口设置默认值（如果医院要求必填则强制开启）
++ 非小程序渠道提交时设为 `null`（避免脏数据）
+
+**收获**：多控制源的字段需要明确优先级链。在设计阶段就应该画清楚：`后端配置 > 用户手动 > 默认值`，而不是边写边改。
+
+---
+
+### 4.3 XSS防护完善
+**现象**：AI代码审查发现导入失败的错误信息展示存在XSS风险。
+
+**根因**：导入失败时，服务端返回的错误信息可能包含用户上传的数据（如门店名称）。这些信息通过 `dangerouslyUseHTMLString: true` 渲染（为了支持 `<br>` 换行），如果不转义就会执行恶意脚本。
+
+**修复**：
+
+```plain
+aadcda8 fix: 完善XSS防护 - 使用完整HTML转义包含引号
+```
+
+最初只转义了 `<` 和 `>`，后来发现引号也需要转义（攻击者可以通过 `"` 闭合属性）。
+
+**收获**：使用 `dangerouslyUseHTMLString` 时，必须对所有用户输入做完整的HTML转义。标准的5字符转义（`& < > " '`）是底线。
+
+---
+
+### 4.4 签章功能的枚举值和文案校对
+**现象**：签章管控功能上线后，发现枚举值和中文文案的映射前后端不一致。
+
+**根因**：签章管控有两个字段——`signatureControl`（签章同一用户）和 `signMode`（签章管控模式），两个字段的枚举值定义在前端和后端之间有偏差。
+
+**修复**：
+
+```plain
+a9a0d32 fix：签章同一用户枚举值和文案校对修改
+eec4699 fix：签章同一用户枚举值和文案校对修改2
+```
+
+**收获**：枚举类字段必须在接口文档中明确定义，前后端联调时逐一校对。最好在前端用常量文件统一管理枚举（如 `const/StoreConfig.js`），而不是在每个组件中散落定义。
+
+---
+
+### 4.5 ESLint引入的存量代码适配
+**现象**：项目中期引入ESLint后，存量代码触发大量报错。
+
+**根因**：项目初期没有代码规范工具，存量代码中存在console.log残留、未使用的变量、不一致的代码风格等问题。
+
+**修复**：
+
+```plain
+ef1bbbb feat: 添加eslint校验文件
+691dd70 feat: 修改eslint配置
+e932380 fix: eslint错误修复
+```
+
+先加配置 → 发现规则太严 → 调整配置 → 修复剩余错误。从 `.eslintrc.js` 的 `max-len: 250`（宽松的行长限制）可以看出，为了不改动太多存量代码，规则做了妥协。
+
+**收获**：存量项目引入工程化工具，应该"先宽松后收紧"。一开始就上严格规则会导致大量修改，增加review负担和合并冲突风险。
+
+---
+
+## 五、面试Q&A
+### Q1：请介绍一下这个项目
+**回答**：这是老百姓大药房的处方管理平台，管理全国数千家门店的互联网医院对接和处方流转。我作为项目负责人，负责技术方案设计、代码审查和工程化规范建设。系统覆盖了门店管理、业务配置、审方规则、处方数据查询等核心模块，对接POS终端、百姓通APP、小程序三端渠道。
+
+**追问**：你作为负责人，具体做了哪些技术决策？
+
+→ 引入了Husky + commitlint + ESLint的工程化规范，设计了双Axios实例的微服务网关适配方案，提取了6个Composable函数复用业务逻辑，建立了组件通信的三层规范。
+
+---
+
+### Q2：技术栈为什么选Vue 3而不是React？
+**回答**：这个项目是后台管理系统，Element Plus生态成熟、开箱即用，Vue 3的Composition API足够应对业务复杂度。团队成员的Vue经验更丰富，上手成本低。对于这种CRUD密集型的管理系统，Vue + Element Plus的开发效率是最高的。
+
+---
+
+### Q3：权限系统是怎么设计的？
+**回答**：采用CAS SSO + 组织权限平台的双通道认证。CAS负责身份认证（你是谁），权限平台负责授权（你能看什么）。前端通过 `findMenuByUserId` 接口获取用户的菜单树，再用 `parserPermission` 函数递归匹配路由的 `relativeURL` 字段，最后通过 `router.addRoute()` 动态注入。
+
+**追问**：为什么不用vuex存权限，而是动态注入路由？
+
+→ 动态注入路由的好处是：没有权限的路由根本不会注册，用户即使手动输入URL也无法访问。如果只在vuex里存权限标志，路由本身是存在的，需要在每个页面的 `onMounted` 里检查权限，容易遗漏。
+
+**追问**：parserPermission的性能怎么样？路由多了会不会卡？
+
+→ 目前路由数量在20个以内，两层forEach的O(n*m)复杂度完全可以接受。如果未来路由数量增长到100+，可以改为Map索引，将复杂度降到O(n)。
+
+---
+
+### Q4：门店搜索下拉框是怎么实现无限滚动的？
+**回答**：使用 `useStoreSelect` Composable，结合el-select的 `remote-method` 和Element Plus的 `v-infinite-scroll` 指令。搜索时调用 `storeQuest` 清空列表并请求第一页，滚动到底部时调用 `scrollLoad` 加载下一页并concat到列表中。
+
+**追问**：节流是怎么做的？
+
+→ 采用了三级差异化延迟：首次搜索100ms（快速响应），正在加载中1200ms（防抖），翻页加载800ms（平衡体验）。这是因为搜索和翻页共用同一个数据源，但对响应速度的要求不同。
+
+**追问**：下拉框关闭后滚动页面会触发加载吗？
+
+→ 不会。`v-infinite-scroll` 的disabled条件有三重保护，其中 `!storeVisible` 确保下拉框关闭后不触发加载。
+
+---
+
+### Q5：导出功能的Blob错误检测是怎么做的？
+**回答**：当Axios的 `responseType: 'blob'` 时，所有响应都是Blob。如果服务端返回JSON错误信息，它的 `type` 是 `application/json` 而不是Excel的MIME类型。通过检测 `res.type === 'application/json'`，读取Blob内容并JSON解析，如果是错误则显示提示，否则正常下载文件。
+
+**追问**：为什么要用readFileAsText而不是直接toString？
+
+→ Blob的 `toString()` 返回的是 `[object Blob]`，不是内容。必须用 `FileReader.readAsText()` 读取Blob的内容。
+
+---
+
+### Q6：医保金额计算为什么要用整数缩放？
+**回答**：JavaScript的IEEE 754浮点运算有精度问题，`0.1 + 0.2 !== 0.3`。在医保金额计算中，这种误差会累积导致金额对不上。用 `*10000 → 取整 → 加法 → /10000` 的方式，把浮点运算转化为整数运算，避免精度丢失。
+
+**追问**：为什么是10000而不是100？
+
+→ 医保金额精确到分（2位小数），但中间计算可能涉及更精确的比例。保留4位小数给中间计算留了余量，最终展示时再四舍五入到2位。
+
+---
+
+### Q7：XSS防护是怎么做的？
+**回答**：导入失败时，服务端返回的错误信息可能包含用户上传的数据。这些信息通过 `dangerouslyUseHTMLString: true` 渲染（为了支持 `<br>` 换行），所以必须对用户输入做完整的HTML转义——替换 `& < > " '` 五个字符为对应的HTML实体。
+
+**追问**：为什么不直接用textContent？
+
+→ 因为ElMessage需要支持 `<br>` 换行（多条错误信息分行显示），所以必须用HTML渲染模式。用textContent的话，`<br>` 会被当成纯文本显示。
+
+---
+
+### Q8：团队是怎么做代码审查的？
+**回答**：建立了三层保障：
+
+1. **提交前**：Husky pre-commit hook + lint-staged，自动检查代码规范
+2. **提交时**：commitlint强制conventional commits格式
+3. **合并前**：作为负责人，我会review所有PR的代码变更
+
+**追问**：你review代码时重点关注什么？
+
+→ 重点关注：业务逻辑的边界条件、安全问题（XSS/SQL注入）、公共组件的变更影响范围、API调用的错误处理、枚举值的一致性。
+
+---
+
+### Q9：这个项目有什么技术难点？
+**回答**：最核心的难点是"业务配置"模块的多维度联动。一个配置项可能受渠道、互联网医院、后端配置三个因素影响，且这些因素之间有优先级关系。最初设计时没有理清这些关系，导致初诊信息字段反复修改了三次。后来我梳理了完整的优先级链：`后端配置 > 用户手动 > 默认值`，并用computed动态校验 + 接口联动 + 提交时清洗的三层方案彻底解决了这个问题。
+
+---
+
+### Q10：如果让你重新设计这个项目，你会做什么改变？
+**回答**：
+
+1. **TypeScript**：目前是纯JavaScript，类型检查缺失导致一些低级bug（如枚举值类型不一致）。引入TypeScript可以在编译期发现这类问题。
+2. **Pinia替代Vuex**：Vuex的mutations和actions分层在小项目中是过度设计，Pinia更简洁。
+3. **API层统一管理**：目前每个业务模块有独立的API文件（如 `ServiceConfigurationAPI.js`），可以统一到 `api/` 目录下按业务域组织。
+4. **组件库二次封装**：Tabcom、aedFrom等通用组件可以进一步抽象为npm包，在多个项目间复用。
+
+---
+
+> 文档生成时间：2026-05-19  
+基于代码扫描（maxdepth 3）和Git历史（~400 commits）自动生成
+>

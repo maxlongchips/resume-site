@@ -1,16 +1,26 @@
 <!-- src/components/ProjectsSection.vue -->
 <script setup lang="ts">
-import { ref } from 'vue'
-import { projects } from '../data/content'
+import { ref, computed } from 'vue'
+import { useResumeStore, htmlToArr, stripHtml } from '../stores/resume'
 import SectionHeader from './SectionHeader.vue'
 import { useScrollReveal } from '../composables/useScrollReveal'
 
+const store = useResumeStore()
 const sectionRef = ref<HTMLElement | null>(null)
 useScrollReveal(sectionRef)
 
 function formatIndex(i: number): string {
   return String(i + 1).padStart(2, '0')
 }
+
+const projects = computed(() =>
+  store.projects.map((p) => ({
+    ...p,
+    intro: stripHtml(p.intro),
+    responsibilities: htmlToArr(p.responsibilities),
+    achievements: htmlToArr(p.achievements),
+  })),
+)
 </script>
 
 <template>
@@ -36,21 +46,16 @@ function formatIndex(i: number): string {
           </div>
         </div>
 
-        <!-- Project background -->
+        <!-- 1. 项目简介与技术栈 -->
         <div class="project-section">
-          <div class="section-label">项目背景</div>
-          <p class="section-content">{{ project.background }}</p>
+          <div class="section-label">项目简介与技术栈</div>
+          <p class="section-content">{{ project.intro }}</p>
+          <p class="tech-stack-line">{{ project.techStack }}</p>
         </div>
 
-        <!-- Project description -->
+        <!-- 2. 核心职责 -->
         <div class="project-section">
-          <div class="section-label">项目描述</div>
-          <p class="section-content">{{ project.description }}</p>
-        </div>
-
-        <!-- Responsibilities -->
-        <div class="project-section">
-          <div class="section-label">个人职责</div>
+          <div class="section-label">核心职责</div>
           <ul class="responsibilities-list">
             <li
               v-for="(resp, idx) in project.responsibilities"
@@ -63,9 +68,45 @@ function formatIndex(i: number): string {
           </ul>
         </div>
 
-        <!-- Achievements -->
+        <!-- 3. 难点与解决方案 (STAR) -->
         <div class="project-section">
-          <div class="section-label">项目成果</div>
+          <div class="section-label">难点与解决方案</div>
+          <div
+            v-for="(challenge, idx) in project.challenges"
+            :key="idx"
+            class="challenge-block"
+          >
+            <div class="star-row">
+              <span class="star-tag">S</span>
+              <span class="star-text">{{ challenge.situation }}</span>
+            </div>
+            <div class="star-row">
+              <span class="star-tag">T</span>
+              <span class="star-text">{{ challenge.task }}</span>
+            </div>
+            <div class="star-row">
+              <span class="star-tag">A</span>
+              <span class="star-text">{{ challenge.action }}</span>
+            </div>
+            <div class="star-row">
+              <span class="star-tag">R</span>
+              <span class="star-text">{{ challenge.result }}</span>
+            </div>
+            <div v-if="challenge.techConcepts?.length" class="tech-concepts">
+              <span
+                v-for="concept in challenge.techConcepts"
+                :key="concept"
+                class="concept-tag"
+              >
+                {{ concept }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 4. 成果与沉淀 -->
+        <div class="project-section">
+          <div class="section-label">成果与沉淀</div>
           <ul class="achievements-list">
             <li
               v-for="(achievement, idx) in project.achievements"
@@ -78,7 +119,7 @@ function formatIndex(i: number): string {
           </ul>
         </div>
 
-        <!-- Tech stack -->
+        <!-- Tech stack tags -->
         <div class="project-footer">
           <div class="tech-tags">
             <span
@@ -168,7 +209,7 @@ function formatIndex(i: number): string {
 
 .project-type {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--accent);
   padding: 2px 10px;
   border: 1px solid var(--accent);
@@ -177,12 +218,12 @@ function formatIndex(i: number): string {
 
 .project-period {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text-dim);
 }
 
 .project-role {
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-dim);
   font-weight: 300;
 }
@@ -194,7 +235,7 @@ function formatIndex(i: number): string {
 
 .section-label {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12px;
   color: var(--accent);
   letter-spacing: 0.15em;
   text-transform: uppercase;
@@ -202,7 +243,7 @@ function formatIndex(i: number): string {
 }
 
 .section-content {
-  font-size: 14px;
+  font-size: 16px;
   color: var(--text-dim);
   line-height: 1.8;
   font-weight: 300;
@@ -223,14 +264,14 @@ function formatIndex(i: number): string {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-dim);
   line-height: 1.6;
 }
 
 .bullet {
   color: var(--accent);
-  font-size: 12px;
+  font-size: 14px;
   margin-top: 2px;
   flex-shrink: 0;
 }
@@ -254,7 +295,7 @@ function formatIndex(i: number): string {
 
 .tech-tag {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--text-muted);
   padding: 4px 12px;
   background: rgba(255, 255, 255, 0.02);
@@ -266,6 +307,84 @@ function formatIndex(i: number): string {
   border-color: var(--accent);
   color: var(--text);
   background: var(--accent-subtle);
+}
+
+/* Tech stack line */
+.tech-stack-line {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.8;
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--accent);
+}
+
+/* Challenge block */
+.challenge-block {
+  margin-bottom: 20px;
+  padding: 20px;
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid var(--border);
+}
+
+.challenge-block:last-child {
+  margin-bottom: 0;
+}
+
+/* STAR rows */
+.star-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.star-row:last-of-type {
+  margin-bottom: 0;
+}
+
+.star-tag {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.star-text {
+  font-size: 15px;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+/* Tech concepts */
+.tech-concepts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.concept-tag {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--accent);
+  padding: 3px 10px;
+  border: 1px solid rgba(232, 168, 73, 0.3);
+  background: var(--accent-subtle);
+  letter-spacing: 0.03em;
 }
 
 /* Responsive */

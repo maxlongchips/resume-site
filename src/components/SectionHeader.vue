@@ -5,14 +5,47 @@ defineProps<{
 }>()
 </script>
 
+<style scoped>
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 40px;
+}
+
+.section-cmd {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.section-line {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border-hover), transparent);
+}
+
+.section-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: 0.15em;
+}
+
+@media (max-width: 768px) {
+  .section-num {
+    display: none;
+  }
+}
+</style>
+
 <template>
-  <div class="flex items-center gap-4 mb-10" data-reveal>
-    <span class="font-[var(--font-mono)] text-xs text-[var(--text-muted)] whitespace-nowrap">
+  <div class="section-header" data-reveal>
+    <span class="section-cmd">
       <span class="text-[var(--accent)]">❯</span> {{ command }}
     </span>
-    <span class="flex-1 h-px bg-gradient-to-r from-[var(--border-hover)] to-transparent"></span>
-    <span class="font-[var(--font-mono)] text-[10px] text-[var(--text-muted)] tracking-[0.15em]">
-      {{ sectionNum }}
-    </span>
+    <span class="section-line"></span>
+    <span class="section-num">{{ sectionNum }}</span>
   </div>
 </template>

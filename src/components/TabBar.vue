@@ -1,26 +1,56 @@
 <script setup lang="ts">
 import { tabs } from '../data/content'
+import ThemeToggle from './ThemeToggle.vue'
 
-defineProps<{
+const props = defineProps<{
   activeTab: string
 }>()
+
+const emit = defineEmits<{
+  navigate: [id: string]
+}>()
+
+function handleKeydown(e: KeyboardEvent, tabId: string) {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    emit('navigate', tabId)
+  }
+}
 </script>
 
 <template>
-  <div class="flex border-b border-[var(--border)] font-[var(--font-mono)] text-[11px] bg-[var(--bg-deep)] sticky top-0 z-10">
-    <div
+  <div class="tab-bar" role="tablist">
+    <button
       v-for="tab in tabs"
       :key="tab.id"
       class="tab"
+      role="tab"
+      :aria-selected="activeTab === tab.id"
+      :tabindex="activeTab === tab.id ? 0 : -1"
       :class="{ active: activeTab === tab.id }"
+      @click="emit('navigate', tab.id)"
+      @keydown="handleKeydown($event, tab.id)"
     >
-      <span class="tab-dot"></span>
+      <span class="tab-dot" aria-hidden="true"></span>
       <span>{{ tab.label }}</span>
-    </div>
+    </button>
+    <ThemeToggle />
   </div>
 </template>
 
 <style scoped>
+.tab-bar {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  background: var(--bg-deep);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
 .tab {
   padding: 12px 24px;
   color: var(--text-muted);

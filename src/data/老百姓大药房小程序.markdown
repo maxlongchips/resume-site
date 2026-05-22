@@ -1,0 +1,737 @@
+> 本文档基于对 lbxmall 项目代码、架构、Git 历史的全量扫描整理，涵盖项目介绍、核心模块、技术亮点、代表性 Bug 修复、面试深挖等内容。  
+整理时间：2026-05-15
+>
+
+---
+
+# 一、项目介绍（简历用）
+## 1.1 项目概况
+**老百姓大药房小程序（lbxmall）** — 从 0 到 1 主导开发的医药电商微信小程序，服务于老百姓大药房连锁药房体系（覆盖 18+ 子品牌）。项目承载了**在线购药、互联网医院复诊开方、医保支付、全球购跨境商城、会员储值卡、分销直播**等核心业务。
+
++ **技术栈：** 微信小程序原生框架 + Vant Weapp UI 组件库 + 自研 wxMiniStore 状态管理 + EventEmitter3 事件总线 + GrowingIO / 神策双埋点体系
++ **项目规模：** 14 个分包、200+ 页面、25+ API 模块、60+ 公共组件
++ **业务覆盖：** 全国多省市医保对接、6+ 家互联网医院、18+ 药房子品牌
+
+## 1.2 技术栈全景
+| 层级 | 技术选型 | 说明 |
+| --- | --- | --- |
+| 框架 | 微信小程序原生 | .wxml + .wxss + .js |
+| UI 组件库 | Vant Weapp | Dialog、Toast、Picker、Stepper、Sticky 等 |
+| 状态管理 | 自研 wxMiniStore | 劫持 Page/Component 构造函数，diff 算法精准 setData |
+| 事件总线 | EventEmitter3 | 跨页面通信、登录态协调、性能埋点生命周期 |
+| 数据埋点 | GrowingIO + 神策 | 双通道上报，12+ 自动注入维度 |
+| HTTP 层 | 自研 Request 单例 | 请求队列 + 事件总线重放 + 401 重试队列 + Token 主动续期 |
+| 缓存层 | 自研 wxcache | 封装 wx.getStorageSync，支持 TTL 过期 |
+| 医保支付 | 策略模式 | YbPayManager + BaseYbPayStrategy + 城市具体策略 |
+| 处方系统 | 自研 presHttp 代理 | 处方 API 通过商城后端代理转发，统一 Token |
+| 实时通信 | WebSocket + HTTP 轮询 | 双通道处方状态追踪，10s 心跳 |
+| 日期处理 | dayjs | 轻量级日期库 |
+| 精度计算 | BigNumber.js | 中药剂量浮点精度校验 |
+| 条码/二维码 | JsBarcode + qrjs | Canvas 渲染处方凭证 |
+
+
+---
+
+# 二、核心业务模块
+## 2.1 互联网医院复诊开方系统（最复杂模块）
+完整的在线问诊流程：
+
+```plain
+首页（医保类型选择）
+  └→ 问诊类型选择（西医/中医）
+      └→ 提交页（患者/诊断/药品/首诊/问诊方式）
+          ├→ 药品搜索页
+          ├→ 患者管理 / 新增患者页
+          ├→ [visitWay=3] 内置 IM 聊天问诊
+          ├→ [visitWay=1] H5 WebView 问诊
+          └→ [visitWay=2] 跳转第三方小程序（视频问诊）
+              └→ 处方结果（条形码 / 二维码）
+                  └→ 处方记录详情
+                      └→ 聊天历史回放
+```
+
+**核心特性：**
+
++ 对接 6+ 家互联网医院（华夏、智云、泰康、平安、580、赤峰等），每家医院有独立的接入方式、字段校验规则、实名认证要求
++ 支持 4 种医保类型（门诊统筹、普通医保、门诊慢特病、非医保），影响医院路由和结算方式
++ 西药（最多 5 种）与中药（最多 30 味）双轨剂量体系，中药含精致中药 BigNumber 精度校验
++ 视频问诊通过跳转第三方小程序实现音视频通话
+
+## 2.2 多城市医保支付系统
++ 策略模式架构：`YbPayManager` + `BaseYbPayStrategy` + 城市具体策略
++ 已对接：武汉医保、广州医保（粤医保）、南通医保（江苏医保）
++ 状态机生命周期：授权准备 → 授权回调 → 支付准备 → 支付回调
++ 涉及跨小程序跳转（医保授权小程序 → 支付 H5 → 结果页）
+
+## 2.3 全球购跨境商城
++ 三种活动模式：普通全球购、员工内购、外部企业采购
++ 跨境实名认证（身份证 18 位校验）、海关清关、税费计算（salePrice + tax）
++ 多仓库购物车结算（同仓合并、异仓分单）
++ 瀑布流商品列表（高度均衡双列布局）
+
+## 2.4 电商核心链路
++ 首页（金刚区/轮播/活动入口）、分类、搜索、商品详情、购物车、确认订单、支付、订单列表/详情、售后退款
++ 三种履约方式：同城配送、快递配送、到店自提
++ 秒杀、特价、拼团、优惠券、分销、直播带货等营销玩法
++ 提货卡 / 储值卡 / 积分体系
+
+## 2.5 分销与直播系统
++ 员工分销（绑定关系、佣金、排行榜、分享海报）
++ 微信小程序直播插件集成，直播间埋点追踪
++ 企微外部联系人管理
+
+---
+
+# 三、技术架构亮点
+## 3.1 请求队列 + 事件总线的登录态管理
+**问题：** 小程序冷启动时多个页面同时发起请求，但登录态尚未就绪。
+
+**方案：** 设计了 `Reuqest` 单例类，未登录的请求入队并生成 GUID，通过 EventEmitter3 的 `once` 监听，登录完成后批量重放。401 场景同样走 retryQueue，配合 `loginFailCount` 熔断机制（3 次失败弹窗提示）。
+
+```plain
+请求进入 enterRequest()
+  ├→ 已登录 → 直接发请求
+  └→ 未登录 → 生成 GUID 入队 requestTask
+              → 创建 Promise，once(guid) 挂起
+              → startLogin()
+              → 登录成功 → 遍历队列重放
+              → 每个请求 resolve 时 emit(guid)
+              → Promise 链恢复
+```
+
+## 3.2 Token 主动续期机制
+**问题：** Token 2 小时过期，被动刷新会导致用户操作中断。
+
+**方案：** 在 `wxcache.get('CACHE_token')` 时检查过期时间，若剩余 < 600 秒，通过事件总线触发 `referLogin` 事件，后台静默刷新 Token，用户无感知。
+
+## 3.3 医保支付策略模式重构
+**问题：** 原来每个城市的医保逻辑散落在各页面的 if-else 中，新增城市需要改 5+ 个文件。
+
+**方案：** 抽象出 `BaseYbPayStrategy` 基类，定义 6 个生命周期钩子：
+
+```javascript
+// baseYbPayStrategy.js
+class BaseYbPayStrategy {
+  matchOnShow(pageContext) {}     // 是否处理当前 onShow
+  matchPayAction(orderItem) {}   // 是否处理当前支付
+  onAuthPrepare() {}             // 授权准备
+  onAuthReturn() {}              // 授权回调
+  onPayPrepare() {}              // 支付准备
+  onPayReturn() {}               // 支付回调
+}
+```
+
+`YbPayManager` 统一调度，新增城市只需新增一个策略文件注册即可。
+
+## 3.4 自研响应式状态管理（wxMiniStore）
++ 劫持全局 `Page()` 和 `Component()` 构造函数，自动注入 `$state`
++ setState 时通过 diff 算法计算最小变更集，精准 `setData`，减少小程序 JSBridge 通信开销
++ 支持 `useProp` 按需订阅，只更新关心的状态切片
+
+## 3.5 瀑布流性能优化
+**问题：** 原实现逐个商品调用 `setData` + `getBoxHeight`，在小程序中每次 setData 都是一次 JSBridge 调用。
+
+**方案：**
+
+1. 预取当前左右列高度（一次 getBoundingClientRect 调用）
+2. 高度差启发式分配（diff > 280 阈值）
+3. 所有商品计算完后，合并为一个 setData 对象一次性提交
+
+从 O(N) 次 setData 降到 O(1) 次。
+
+## 3.6 双通道数据埋点体系
++ 封装统一 `gioTrack()` 函数，同时上报 GrowingIO 和神策
++ 自动注入 12+ 维度上下文（会员 ID、门店、城市、员工身份、页面路径等）
++ 空值统一归一化为 `'-'`
+
+**页面性能埋点 — Barrier 模式：**
+
+```plain
+每个页面配置关键 API 列表
+onReady + 路由完成 + N 个 API 响应后
+  （num === pageRequestList.length + 2）
+统一计算 render_time、request_time、page_time
+上报 GrowingIO page_performance 事件
+```
+
+## 3.7 多品牌小程序配置化
++ 支持 18+ 药房品牌（老百姓、百信源、惠堂、万仁、林家怡等）
++ 每个品牌独立 appId / 域名 / 埋点配置
++ 非生产环境支持运行时切换品牌（ActionSheet 选择器）
+
+## 3.8 字体加载容错机制
+```plain
+网络预检测（HEAD 请求）
+  → 带退避的重试（1s / 2s / 3s 递增延迟）
+  → 降级到系统字体
+字体文件错开加载（间隔 300ms），避免并发请求
+```
+
+---
+
+# 四、代表性 Bug 修复
+## 4.1 异步竞态导致弹窗偶发不展示
+| 维度 | 内容 |
+| --- | --- |
+| **现象** | 切换互联网医院时，Kz580 未结束订单拦截弹窗时有时无 |
+| **根因** | 患者列表加载和医院配置加载是两个异步操作，执行顺序不确定。当患者列表先加载完成时，医院配置还未就绪，`netHospitalCode` 为空导致检查被跳过 |
+| **修复** | 三处 `setTimeout(() => { ... }, 50)` 延迟回调，确保子组件初始化完成后再执行检查；增加 null-safety（`result?.doctorCheckStatus`） |
+| **Git Commit** | `9481069f3` |
+
+
+## 4.2 精致中药剂量校验浮点精度丢失
+| 维度 | 内容 |
+| --- | --- |
+| **现象** | 用户填写的中药剂量明明是包装规格的整数倍，但校验不通过 |
+| **根因** | JS 原生浮点运算精度问题。如 `3 * 0.15 = 0.44999999999999996`（而非 0.45），`0.4499... % 0.3 = 0.14999...`（而非 0） |
+| **修复** | 引入 BigNumber.js，所有乘法/取模运算改为 `new BigNumber(x).times(y).mod(z).toString() !== '0'` |
+| **Git Commit** | `016d85ed0` |
+
+
+## 4.3 重新开方 UUID 重复
+| 维度 | 内容 |
+| --- | --- |
+| **现象** | 用户完成一次开方后返回重新开方，埋点 UUID 与上次相同，导致数据污染 |
+| **根因** | UUID 在页面 `onShow` 时生成，但没有消费标记，返回时不会刷新 |
+| **修复** | 引入 `isPostradecodeConsumed` 标记，处方提交成功后标记为已消费；`onShow` 时检查标记，已消费则重新生成 UUID |
+| **Git Commit** | `5a9baffae` |
+
+
+## 4.4 处方埋点事件丢失
+| 维度 | 内容 |
+| --- | --- |
+| **现象** | 用户从 IM 聊天页手动进入处方详情时，`mztc_kf_end` 事件不触发 |
+| **根因** | 事件在提交页触发，但用户通过 IM 路径绕过了提交页 |
+| **修复** | 将事件触发移到处方详情页，通过 `globalData.activePrescriptionId` 实现一次性触发机制 |
+| **Git Commit** | `ca5ce3579` |
+
+
+## 4.5 医保支付策略模式重构
+| 维度 | 内容 |
+| --- | --- |
+| **背景** | 原来每个城市的医保逻辑散落在各页面的 if-else 中，新增城市需要改 5+ 个文件 |
+| **方案** | 重构为策略模式，9 个文件 356 行新代码替代散落的 if-else |
+| **Git Commit** | `869f436f4` |
+
+
+---
+
+# 五、数据指标
+| 维度 | 指标 |
+| --- | --- |
+| 项目规模 | 14 个分包、200+ 页面、25+ API 模块、60+ 公共组件 |
+| 品牌覆盖 | 18+ 药房子品牌小程序 |
+| 医保对接 | 3 个城市医保系统（武汉/广州/南通） |
+| 互联网医院 | 6+ 家第三方互联网医院 |
+| 埋点覆盖 | GrowingIO + 神策双通道，12+ 自动注入维度 |
+| 性能优化 | 瀑布流 setData 次数从 N 次降到 1 次；页面性能自动上报覆盖 18 个核心页面 |
+| 代码质量 | 策略模式重构医保支付（9 文件 356 行新代码）；自研状态管理减少冗余 setData |
+| 支付方式 | 微信支付、医保支付（3 城）、储值卡支付、混合支付 |
+
+
+---
+
+# 六、互联网医院复诊开方系统 — 深度剖析
+## 6.1 系统架构总览
+整个处方系统由 **9 个页面 + 6 个子组件 + 3 个工具模块 + 2 个 API 模块** 组成。
+
+### 核心页面清单
+| 页面 | 路径 | 职责 |
+| --- | --- | --- |
+| 处方首页 | `subPrescription/pages/homeIndex/index` | 认证、门店选择 |
+| 医保类型选择 | `subPrescription/pages/home/index` | 4 种医保类型入口 |
+| 问诊类型选择 | `subPrescription/pages/consultationType/index` | 西医/中医 + UUID 生命周期 |
+| 提交页 | `subPrescription/pages/submission/index` | 核心表单页（最复杂单文件） |
+| 药品搜索 | `subPrescription/pages/drugSearch/index` | 搜索添加药品 |
+| IM 聊天问诊 | `subPrescription/pages/consultChat/index` | 动态问诊单 + WebSocket |
+| 处方记录列表 | `subPrescription/pages/recordConsultation/index` | 分页查询 |
+| 处方详情 | `subPrescription/pages/recordDetail/index` | 详情 + 条码展示 |
+| 患者管理 | `subPrescription/pages/patientManage/index` | CRUD 列表 |
+| 新增/编辑患者 | `subPrescription/pages/addPatient/index` | 表单 + 身份证校验 |
+
+
+### 核心文件索引
+| 用途 | 路径 |
+| --- | --- |
+| 全局状态 | `subPrescription/globalData.js` |
+| 处方 API | `subPrescription/api/drugs.js` |
+| 患者 API | `subPrescription/api/patient.js` |
+| HTTP 代理 | `subPrescription/utils/presHttp.js` |
+| WebSocket | `subPrescription/utils/websocket.js` |
+| 身份证校验 | `subPrescription/utils/idCardUtils.js` |
+
+
+## 6.2 提交页（submission/index.js）— 全项目最复杂单文件
+### 6.2.1 页面初始化的三个异步操作
+页面 onLoad 时并行发起三个异步请求，它们之间存在竞态关系：
+
+| 操作 | 方法 | 返回数据 |
+| --- | --- | --- |
+| 获取医院配置 | `initHospitalInfo()` → `listRelatedHospitals` | textHospital / videoHospital（含 visitWay、netHospitalCode、isIdCardRequired 等） |
+| 获取患者列表 | `getPatient()` → `patientList` | 患者数组，用于横向卡片选择器 |
+| 获取必填配置 | `getRequiredConfig()` → `listIsRequiredInfo` | isIdCardRequired、isFirstVisitRequired（因医院 + 问诊类型 + 医保类型而异） |
+
+
+用 `_hospitalDone` 和 `_patientDone` 两个标记位追踪完成状态，`triggerLoadedTrack()` 只在两者都完成时触发埋点。
+
+### 6.2.2 完整校验链（10 步）
+`submitFunc` 是唯一的提交入口，按以下顺序执行：
+
+```plain
+Step 0:  Kz580 未完成订单拦截（异步，调 API 检查）
+  ↓ 通过
+Step 1:  精致中药剂量 BigNumber 精度校验（tcmType==='3' 时）
+  ↓ 通过
+Step 2:  互联网医院是否已配置（enableType 为真）
+  ↓ 通过
+Step 3:  药品列表非空
+  ↓ 通过
+Step 4:  getAllData() — 调用 4 个子组件的 get* 方法收集数据
+  ↓
+Step 5:  患者姓名非空
+  ↓
+Step 6:  身份证（条件必填 — 由 listIsRequiredInfo API 动态决定）
+  ↓ 若缺失 → Dialog.confirm 引导跳转患者编辑页
+Step 7:  手机号非空
+  ↓
+Step 8:  问诊方式已选择（不能为 0）
+  ↓
+Step 9:  首诊信息（条件必填 — 医院 + 日期 + 图片）
+  ↓
+Step 10: 诊断非空（至少 1 个 ICD-10 编码）
+  ↓
+Step 11: 药品用法用量
+  ├→ 西药：非必填，但会把编辑值回写到 drugList
+  └→ 中药：必填（剂数/用法/用量），精致中药再次校验 BigNumber
+  ↓
+Step 12: 泰康实名认证（仅 netHospitalCode==='TaiKang'）
+  ↓ 若失败 → 弹出自定义编辑 Dialog，用户修正后自动重新提交
+Step 13: 体重非空
+  ↓
+Step 14: 用户告知书（首次提交弹 Dialog 确认，PingAn 有专用告知书）
+  ↓ 全部通过
+组装请求体 → applyPrescription(msg)
+```
+
+### 6.2.3 子组件通信架构
+提交页作为父页面，通过两种模式与 6 个子组件通信：
+
+**命令式调用（父→子）：** 通过 `selectComponent('#patient')` 获取组件实例，直接调用方法：
+
++ `patient.getPatientData()` — 获取当前选中患者
++ `askType.getAskType()` — 获取问诊方式
++ `drugsInfo.getEditDrugs()` — 获取用法用量编辑数据
++ `disease.getDiseaseData()` — 获取诊断数据
++ `firstHospital.exportData()` — 获取首诊信息
+
+**事件驱动（子→父）：** 通过 `triggerEvent` 上报：
+
+| 子组件 | 事件 | 父页面处理 |
+| --- | --- | --- |
+| #patient | `changePatient` | 触发 Kz580 检查 |
+| #patient | `updatePatient` | 更新患者列表，触发 Kz580 检查 |
+| #askType | `setact` | 切换医院，重新获取必填配置 |
+| #disease | `getDiagnoses` | 自动推荐诊断 |
+| #drugsInfo | `loadData` | 刷新药品列表 |
+
+
+**发布订阅（跨页面）：** 通过 `wx.$globalData.$eventEmitter`：
+
++ `getDrugsInfo` — 药品搜索页返回时通知提交页刷新药品列表和自动推荐诊断
+
+### 6.2.4 医院切换的连锁反应
+用户在问诊方式组件中切换文字/视频时，`setact` 触发以下连锁：
+
+```plain
+切换问诊方式
+  → 选择对应 hospital 对象（textHospital / videoHospital）
+  → 更新 visitWay、netHospitalCode 实例变量
+  → globalData.applyType 同步
+  → setData 更新页面数据
+  → [回调中] 若患者已加载 → setTimeout(50ms) → checkKz580Unfinished()
+  → globalData.currentNetHospitalCode 同步
+  → getRequiredConfig() 重新调用 API
+  → isIdCardRequired / isFirstVisitRequired 可能变化
+  → #patient 组件的 isIdCardRequired 属性更新
+  → #firstHospital 组件的 isFirstVisitRequired 属性更新
+  → #drugsInfo 组件的 applyType/netHospitalCode observer 触发
+  → 药品字典缓存检查（baseData.infoTIDict / infoVADict）
+  → 若未缓存 → 重新拉取药品字典
+```
+
+**关键设计决策：** 切换时**不清空**药品列表、患者选择、诊断列表。已填数据保留，只刷新配置相关的校验规则和字典选项。
+
+### 6.2.5 Kz580 未完成订单拦截
+`checkKz580Unfinished()` 返回 `Promise<boolean>`，`true` 表示放行，`false` 表示阻断。
+
+**执行流程：**
+
+```javascript
+// Guard 1: 非 Kz580 医院直接放行
+if (this.data.netHospitalCode !== 'Kz580') return true;
+
+// Guard 2: 无患者组件直接放行
+if (!this.selectComponent('#patient')) return true;
+
+// Guard 3: 无患者数据或手机号直接放行
+if (!patientData || !patientData.mobile) return true;
+
+// 核心检查：调 API 查询该手机号是否有未完成的问诊
+const res = await getLatestConsultation({
+  storeCode, netHospitalCode: 'Kz580', patientMobile: patientData.mobile
+});
+
+// 拦截条件：API 返回了有效的问诊 URL
+if (res?.code === 0 && res?.data?.netHospitalConsultationUrl) {
+  // 弹 Dialog 阻断，提供"进入问诊"和"关闭"两个选项
+  return false;
+}
+return true;
+```
+
+**触发点（5 处）：**
+
+| 触发位置 | 场景 |
+| --- | --- |
+| `submitFunc` | 最终提交时的硬拦截 |
+| `setact` | 用户切换问诊方式到 Kz580 |
+| `onPatientChange` | 用户在 Kz580 下切换患者 |
+| `onUpdatePatient` | 用户快速填写身份证后患者数据更新 |
+| `getPatient` 回调 | 患者先加载完，医院后加载完 |
+| `initHospitalInfo` 回调 | 医院先加载完，患者后加载完 |
+
+
+后两处互为"补刀"，确保无论谁先完成，检查都会执行。
+
+### 6.2.6 医院差异化逻辑
+| 医院 | 差异点 | 代码位置 |
+| --- | --- | --- |
+| 华夏（HuaXia） | 默认文字问诊医院 | `globalData.textHospital` |
+| 智云（ZhiYun） | 默认视频问诊医院 | `globalData.videoHospital` |
+| 泰康（TaiKang） | 强制实名认证，失败弹编辑 Dialog | `submitFunc` Step 12 |
+| 平安（PingAn） | 强制 visitWay=2，专用告知书 | `getHospitals()` + `submitFunc` Step 14 |
+| 580（Kz580） | 未完成订单拦截 | `checkKz580Unfinished()` |
+
+
+### 6.2.7 药品用法用量编辑
+**西药（drugType === 0）：**
+
++ 每种药品独立的用法用量：`dachDose`（剂量）、`unitOf1`（单位）、`usageTime`（频次）、`modeFor`（途径）、`daysTime`（天数）
++ 非必填，但会回写到 drugList
++ 预定义选项来自药品字典（`USAGE_METHOD_DICT`、`DOSAGE_CYCLE_DICT`、`WESTERN_UNIT_DICT`）
++ 字典按问诊类型缓存（TextImage / VideoApply 各一份）
+
+**中药（drugType === 1）：**
+
++ 所有药品共享一份用法用量：`drugDose`（剂数）、`usageMethod`（用法）、`dosageCycle`（用量）
++ 默认值：`内服中药` / `水煎服，每日一剂，分早晚两次服用`
++ 必填校验
+
+**精致中药（tcmType === '3'）额外校验：**
+
+```javascript
+// 每种药品的 quantity × drugDose 必须是 mcContent 的整数倍
+new BigNumber(quantity).times(drugDose).mod(mcContent).toString() === '0'
+```
+
+## 6.3 IM 聊天问诊（consultChat/index.js）
+### 6.3.1 动态问诊单系统
+问题列表从服务端动态获取，按 `netHospitalCode` + `patientInfo` 返回：
+
+| 问题类型 | 渲染方式 | 用户交互 | 数据格式 |
+| --- | --- | --- | --- |
+| `radio` | 对勾/叉号两张图 | 点击选一个 | `option[flag].value` |
+| `checkbox` | medicalHistory 多选组件 | 勾选多个，逗号分隔 | `value1,value2,...` |
+| `text` | 先显示对勾/叉号，点"是"后展开输入框 | 输入自由文本 | 原始字符串 |
+
+
+回答完成后调用 `dealQuesList()` 将聊天界面的中文文本反序列化为 API 格式。
+
+### 6.3.2 WebSocket + HTTP 轮询双通道
+```plain
+applyPrescription API 成功
+  ├── HTTP 轮询: setInterval(getDetail, 15000)  ← 每 15 秒
+  └── WebSocket: wsConnect(prescriptionId)      ← 实时推送
+         ↓ 心跳: 每 10 秒发 {"type":"ping"}
+         ↓
+  两个通道 → 同一个处理器 dealKaiFangResult(content)
+```
+
+**为什么需要双通道？**
+
++ WebSocket 提供实时性（医生接诊的瞬间就能感知）
++ HTTP 轮询作为兜底（WebSocket 断连、心跳超时、网络波动时保证不丢消息）
++ 任一通道收到终态（status 20 或 30）→ 停止轮询 → 关闭 WebSocket
+
+### 6.3.3 处方状态机
+| Status | 含义 | consultChat 行为 | recordDetail 行为 |
+| --- | --- | --- | --- |
+| 10 | 待接诊 | 视频问诊 → goVideo() 跳转第三方小程序 | 无特殊处理 |
+| 12 | 视频会话密钥就绪 | 同 status 10 | 无特殊处理 |
+| 20 | 开方成功 | 停止轮询，显示处方卡 + 条码 | 显示"开方成功"，当天可展示条码 |
+| 30 | 开方失败 | 停止轮询，显示失败原因 | 显示"开方失败" + `doctorCheckResult` |
+
+
+**visitWay 动态覆盖：** 服务端可能在轮询响应中返回与前端不同的 `visitWay` 或 `netHospitalCode`。前端检测到变化后，清除当前 WebSocket/Timer，用新参数重新提交（`isCreate=true`，复用已有 prescriptionId）。
+
+### 6.3.4 视频问诊跳转
+```javascript
+goVideo() {
+  const mnPath = `pages/tr/index/index?userid=${content.userId}
+    &advisoryIdKey=${content.videoSessionKey}
+    &accessKey=LBXSHOP
+    &env=${api_host === 'https://mall.lbxcn.com' ? 'ONLINE' : 'ZYQA'}
+    &back=subPrescription/pages/recordConsultation/index`;
+
+  wx.navigateToMiniProgram({
+    appId: "wx094749b6d02f81f5",  // 智云健康
+    path: mnPath,
+    envVersion: 'release'
+  });
+}
+```
+
+防重复跳转：用 `globalData.mnPath` 作为标记，第一次跳转后设置路径，后续收到 status 10/12 时检查该标记。
+
+### 6.3.5 条形码 / 二维码生成
+| 类型 | 库 | 格式 | 渲染方式 | 颜色 |
+| --- | --- | --- | --- | --- |
+| 条形码 | JsBarcode | CODE39 | Canvas 2D | #49A3F8 |
+| 二维码 | qrjs | 自动检测 | Canvas | #49A3F8 |
+
+
+值为处方流水号 `serialNo`。处方 ID 显示为脱敏格式：`首4位****末4位`。
+
+**时效控制：** 只有当天 + `settlementOrNot===1` + 药师审核未驳回时才显示条码按钮。
+
+## 6.4 身份证校验算法（GB 11643-1999）
+四级串行校验，任一失败立即返回 false：
+
+### 第一级：格式校验
+```javascript
+/(^\d{15}$)|(^\d{17}(\d|X)$)/
+```
+
+接受 15 位纯数字或 17 位数字 + 1 位数字/X。空值直接通过（字段可选）。
+
+### 第二级：省份编码校验
+提取前 2 位，查 `vcity` 映射表（覆盖 34 个省级行政区 + 港澳台 + 海外）。
+
+### 第三级：生日校验
++ 15 位：年份前缀 `'19'`（所有 15 位身份证都是 2000 年前签发）
++ 18 位：直接提取 4 位年份
++ 校验 Date 对象 round-trip（防止 2 月 30 日等非法日期）
++ 年龄范围：3-100 岁
+
+### 第四级：校验码验证
+```plain
+权重: [7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2]
+校验码映射: ['1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2']
+
+sum = Σ(digit[i] × weight[i])   // i = 0..16
+checkDigit = mapping[sum % 11]
+```
+
+**15 位 → 18 位转换：** 在第 6 位后插入 `'19'`，计算校验码追加。
+
+### 身份证与表单联动
+```plain
+身份证输入 → testIdNO() 校验
+  ├→ 有效 → getIdInfo() 提取性别/年龄 → getBirthday() 提取生日
+  │        → sexEditable=false, birthdayEditable=false（锁定只读）
+  ├→ 无效 → toast"身份证号有误" → 字段保持可编辑
+  └→ 空值 → 解锁性别/生日字段为可编辑
+```
+
+## 6.5 API 代理模式（presHttp.js）
+### 为什么要代理？
+处方后端（`lbx-ms-biz-rp-member` / `lbx-ms-prescription-router`）是独立于商城后端的微服务。直接调用存在两个问题：
+
+1. Token 不互通 — 处方后端没有自己的登录体系
+2. 响应格式不同 — 处方后端返回 `{code, data, msg}`，商城后端有自己的包装格式
+
+### 代理链路
+```plain
+小程序页面
+  → presHttp.request({api: '/patient/add', serviceType: 'member'})
+    → 拼接前缀: 'mall/open-prescription/lbx-ms-biz-rp-member' + '/patient/add'
+    → 调用商城的 comRequest({url, isXTY: true})
+      → 商城 request.js 注入 Authorization 头、处理登录队列
+      → isXTY=true → 响应原样返回（不走商城的 code-200/401 处理）
+    → presHttp 自己处理 {code, data, msg} 格式
+```
+
+**关键标记 **`isXTY`**：** 在商城的 `request.js` 中，当 `isXTY` 为真时，`resolve(res)` 直接返回原始响应，跳过商城的标准响应处理逻辑。
+
+### 两种服务前缀
+| 前缀 | 用途 |
+| --- | --- |
+| `member`（默认） | `mall/open-prescription/lbx-ms-biz-rp-member` — 患者/药品/处方 CRUD |
+| `router` | `mall/open-prescription/lbx-ms-prescription-router/miniapp` — 门店医院关系/问诊查询/实名认证/必填配置 |
+
+
+## 6.6 状态管理方案
+### 双层存储架构
+```plain
+┌─────────────────────────────────────┐
+│  globalData（内存，ES Module 单例）   │  ← 页面直接 import 使用
+│  - medInsureType, drugType, store   │
+│  - textHospital, videoHospital      │
+│  - drugList, postradecode           │
+└──────────────┬──────────────────────┘
+               │ 每次写入时同步
+               ▼
+┌─────────────────────────────────────┐
+│  wxcache（wx.getStorageSync 持久化） │  ← 带 CACHE_MZTC_ 前缀
+│  - CACHE_MZTC_MED_TYPE              │
+│  - CACHE_MZTC_POSTRADECODE          │
+│  - CACHE_MZTC_CONSULT_WAY           │
+└─────────────────────────────────────┘
+```
+
+### UUID 流程追踪生命周期
+```plain
+用户选择医保类型
+  → 生成 UUID（v4 格式）
+  → 三处存储（globalData + wxcache + 组件 data）
+  → 触发 mztc_kf_begin 埋点
+  ↓
+所有埋点事件携带该 UUID
+  → mztc_kf_begin → mztc_kf_choose_type → mztc_kf_select_consultation_type
+  → mztc_person_save_click → mztc_kf_end
+  ↓
+处方提交成功
+  → isPostradecodeConsumed = true
+  ↓
+用户返回问诊类型页（onShow）
+  → 检测 consumed 标记
+  → 生成新 UUID → 更新三处存储 → 重置 consumed
+  → 触发新的 mztc_kf_begin
+```
+
+## 6.7 处方系统数据结构
+### globalData 关键字段
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `medInsureType` | number | 医保类型（1=门诊统筹，2=非医保，4=慢特病，6=普通医保） |
+| `drugType` | string | '0'=西药，'1'=中药 |
+| `applyType` | string | '1'=文字问诊，'2'=视频问诊 |
+| `textHospital` | object | 文字问诊医院配置 |
+| `videoHospital` | object | 视频问诊医院配置 |
+| `drugList` | array | 当前流程的药品列表 |
+| `store` | object | 当前门店（含 storeCode、netHospitalCode） |
+| `postradecode` | string | UUID 流程追踪码 |
+| `isPostradecodeConsumed` | boolean | UUID 消费标记 |
+| `submissionForm` | object | 组装后的表单数据 |
+| `chatHistory` | array | 聊天历史回放数据 |
+| `consultationTypeName` | string | 问诊方式名称 |
+
+
+---
+
+# 七、面试深挖问题 & 回答
+## 7.1 架构类问题
+### Q1：这个项目的整体架构是怎样的？你作为 0-1 负责人做了哪些关键决策？
+**回答：** 项目采用微信小程序原生框架，14 个分包按业务域划分。我在架构层面做了几个关键决策：
+
+1. **状态管理方案选型：** 评估了 MobX-miniprogram 和 Redux-like 方案后，选择了自研 wxMiniStore，核心原因是它通过劫持 Page/Component 构造函数实现自动注入，配合 diff 算法精准 setData，在小程序 JSBridge 场景下性能最优。
+2. **请求层设计：** 统一的请求拦截器，解决登录态竞态（请求队列 + 事件总线重放）和 Token 续期（缓存层主动检测 + 后台刷新）。
+3. **医保支付策略模式：** 从 if-else 重构为策略模式，新增城市从改 5 个文件变成新增 1 个文件。
+4. **分包预加载策略：** 首页预加载商品分包，商品详情预加载活动分包，确保核心链路流畅。
+
+### Q2：请求队列和 Token 续期机制详细说说？
+**回答：** 两个核心问题：
+
+**问题一：冷启动竞态。** 小程序 onLaunch 时首页、分类、购物车可能同时发请求，但登录态还没拿到。解法：`enterRequest` 判断需要登录且不在白名单的请求，生成 GUID 入队 `requestTask`，创建 Promise 并通过 EventEmitter3 的 `once(guid)` 挂起。`startLogin()` 完成后遍历队列重放，每个请求 resolve 时 emit 对应 guid，Promise 链恢复。
+
+**问题二：Token 过期。** Token 有效期 2 小时，被动 401 刷新会中断用户操作。解法：在 `wxcache.get()` 的 Token 读取钩子中检查过期时间，若 < 600 秒，移除 `CACHE_isMember` 并 emit `referLogin` 事件，`wxlogin.js` 中监听该事件调用 `getToken()` 静默刷新。
+
+**追问：401 怎么处理的？**  
+进入 `addToRetryQueue`，如果不在刷新中，清 Token 并调 `startLogin()`，登录成功后重放原请求并 resolve 所有 retryQueue 中的 Promise。如果已在刷新中，直接入队等待。熔断：`loginFailCount >= 3` 弹窗提示重启。
+
+### Q3：自研状态管理和直接用 globalData 有什么区别？
+**回答：** globalData 是小程序原生的全局对象，没有响应式能力。页面需要在 onShow 中手动读取并 setData，容易遗漏且代码冗余。
+
+wxMiniStore 的核心改进：
+
+1. **自动注入：** 劫持 Page/Component 构造函数，创建时自动注入 $state 并注册为订阅者，销毁时自动注销
+2. **精准更新：** setState 后通过 diff 算法计算最小变更集，只 setData 变化的 key（带 `$state.` 前缀），减少 JSBridge 通信量
+3. **按需订阅：** 组件可通过 `useProp` 声明只关心哪些状态 key，无关变更不触发 setData
+
+### Q4：医保支付的策略模式具体怎么设计的？为什么选策略模式？
+**回答：** 场景是不同城市医保的授权和支付流程差异大，但生命周期是统一的。
+
+设计了 `BaseYbPayStrategy` 抽象基类，定义 6 个钩子方法和 2 个匹配方法。`YbPayManager` 是单例管理器，持有策略数组，在页面 onShow 和支付点击时遍历策略数组，通过 `matchOnShow/matchPayAction` 找到匹配的策略委托执行。
+
+选策略模式而非模板方法，因为策略之间完全独立（广州医保和南通医保的流程差异太大），模板方法的固定骨架反而限制灵活性。
+
+### Q5：如果让你重新设计，哪些地方会做得不一样？
+**回答：**
+
+1. **TypeScript：** 当前纯 JS，200+ 页面的字段拼写错误难以发现，TS 能在编译期拦截
+2. **处方模块独立仓库：** 处方系统复杂度高且迭代频繁，应该拆为独立 npm 包
+3. **请求层用拦截器链模式：** 当前的请求拦截逻辑集中在 enterRequest 一个函数中，改为 pipe/chain 模式更易扩展
+4. **埋点 SDK 化：** 当前 gioTrack 散落在业务代码中，应该封装为独立 SDK
+5. **状态管理分层：** 全局 store 只放跨页面共享状态，页面级状态用页面内部 store
+
+## 7.2 处方系统专项问题
+### Q6：提交页的校验链中，为什么身份证缺失时用 Dialog 引导跳转而不是直接 toast 报错？
+**回答：** 因为身份证信息的填写不在当前页面完成，而是在患者编辑页。如果只 toast 报错，用户需要手动导航到患者管理 → 找到对应患者 → 编辑 → 填写身份证 → 返回 → 重新提交，路径太长。用 `Dialog.confirm` 提供"去填写"按钮，直接跳转到患者编辑页，编辑完成后通过 `triggerEvent('updatePatient')` 自动刷新患者列表。这是整个校验链中唯一一个"引导修复"而非"直接阻断"的设计。
+
+### Q7：Kz580 的未完成订单检查为什么要从 5 个不同位置触发？
+**回答：** 因为三个异步操作（患者列表、医院配置、问诊类型选择）的完成顺序不确定，而 Kz580 检查依赖"当前患者"和"当前医院"两个条件都已确定。
+
+5 个触发点分别覆盖：提交时硬拦截、切换问诊方式、切换患者、患者数据更新、异步加载完成（两处互为补刀）。用 `setTimeout(50ms)` 等子组件渲染完成后再读取数据。
+
+### Q8：WebSocket + HTTP 轮询双通道，如何保证同一条消息不被处理两次？
+**回答：** 终态后立即停止轮询。status 20/30 处理逻辑是幂等的（setData 相同的值，显示相同的 UI），clearTimer 后轮询停止不会重复处理。中间状态如果是视频问诊会触发 goVideo()，但有 `globalData.mnPath` 防重复保护。
+
+### Q9：处方状态机中，visitWay 动态覆盖是什么场景？
+**回答：** 用户在前端选了文字问诊，提交后医生端可能因需要视频确认而将问诊方式改为视频。前端检测到响应中的 visitWay 与当前不同时，清除 WebSocket/Timer，用新参数重新提交（`isCreate=true`，复用已有 prescriptionId）。这实现了服务端驱动的问诊方式降级/升级。
+
+### Q10：精致中药的 BigNumber 精度问题，能举一个具体的失败案例吗？
+**回答：** 假设某精致中药包装规格 `mcContent = 0.3g`，医生开了 `quantity = 3` 剂，每剂 `drugDose = 0.15g`。
+
+原代码：`3 * 0.15 % 0.3`
+
+JS 浮点运算：`3 * 0.15 = 0.44999999999999996`（而非 0.45），`0.4499... % 0.3 = 0.14999...`（而非 0）。校验失败。
+
+BigNumber 修复后：`new BigNumber(3).times(0.15).mod(0.3).toString() === '0'` → 校验通过。
+
+### Q11：如果用户在问诊过程中杀掉小程序，再重新打开，会发生什么？
+**回答：** 分两种情况：
+
++ **提交前杀掉：** `globalData`（内存）丢失，`wxcache` 中的持久化数据保留。用户需重新走流程。
++ **提交后、医生开方前杀掉：** 处方已在后端排队。用户可在"问诊记录"列表中查看状态。WebSocket 和轮询随页面销毁清理，不会残留。医生开方成功后通过微信订阅消息推送通知用户。
+
+### Q12：医院切换时为什么不清空已填数据？
+**回答：** 产品决策。用户先选了文字问诊填完数据，再切视频问诊，清空数据体验极差。切换时只更新配置相关的校验规则，已填数据保留。如果新医院有更严格的要求，校验链在提交时拦截并引导补充。
+
+## 7.3 性能与工程化问题
+### Q13：瀑布流性能优化具体怎么做的？
+**回答：** 原实现逐个商品 setData + 获取高度，N 个商品就是 N 次 JSBridge 调用。
+
+优化方案：预取当前左右列高度 → 高度差启发式分配（diff > 280 阈值）→ 单次 setData 批量渲染。从 O(N) 次 setData 降到 O(1) 次。
+
+### Q14：双埋点体系怎么设计的？为什么同时用两个？
+**回答：** GrowingIO 擅长用户行为分析和漏斗，神策擅长用户属性和留存分析。封装统一的 `gioTrack()` 函数，同时调用两者。每次调用自动注入 12+ 维度上下文。页面性能用 Barrier 模式，等所有关键 API + onReady + 路由完成后统一计算。
+
+---
+
+# 八、Git 历史中的关键 Commit 索引
+| Commit | 描述 | 类型 |
+| --- | --- | --- |
+| `869f436f4` | 医保支付策略模式重构 | 架构 |
+| `9481069f3` | 修复异步竞态导致弹窗偶发不展示 | Bug |
+| `016d85ed0` | 修复精致中药剂量浮点精度丢失 | Bug |
+| `5a9baffae` | 修复重新开方 UUID 重复 | Bug |
+| `ca5ce3579` | 修复处方埋点事件丢失 | Bug |
+| `64c459ff5` | 处方完成埋点改造方案 | 优化 |
+| `ada4e989a` | 瀑布流性能优化 | 性能 |
+| `0af2a4fd9` | Kz580 未完成订单拦截 | 功能 |
+| `41bda613a` | 网院调度 + 开方提交优化 | 优化 |
+| `12a444610` | 处方状态管理重构（prescriptionStore） | 架构 |
+| `ab3c7a743` | 发票冲红 | 功能 |
+| `56833f8f6` | 提货卡列表门店联动修复 | Bug |
+| `cbfcfa69b` | 储值卡重置密码 | 功能 |
+

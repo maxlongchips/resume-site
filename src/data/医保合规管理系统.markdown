@@ -1,0 +1,1136 @@
+---
+
+## 一、项目介绍
+### 一句话版本
+老百姓大药房医保合规管理系统，基于 Vue 2 + Element UI 构建，覆盖 9 类医保规则的全生命周期管理（创建→配置→关联→启停→导出），支撑全国 5000+ 门店的医保合规运营。
+
+### 详细版本
+| 维度 | 数据 |
+| --- | --- |
+| 技术栈 | Vue 2.6.10 + Vuex 3.1.0 + Vue Router 3.0.2 + Vue CLI 4.4.4（Webpack） |
+| UI 框架 | @lbx/element-ui 2.16.3（私有 Fork，内部 NPM 仓库 10.254.5.90:8080） |
+| 我的角色 | 整个项目负责人，负责架构设计、代码审查、技术方案、任务分配 |
+| 团队规模 | 6 人（前端） |
+| 项目周期 | 19 个月（2024.11 — 2026.05） |
+| Git 提交 | 552 次，16 次正式发版 |
+| 核心模块 | 医保规则配置引擎、CAS SSO 认证、合理用药规则管理、调用日志与导出 |
+| 组件产出 | 16 个业务组件 + cc-element 公共组件库 |
+| 规则类型 | 9 种（诊断、提示、数量、金额、年龄、性别、周期、通用、门店） |
+| 部署环境 | development / test / pre / production 四套 |
+| 工程化 | husky + lint-staged（提交卡口）、plop（模板生成）、compression-webpack-plugin（gzip）、chunk-libs / chunk-elementUI / chunk-commons（分包策略） |
+
+
+**系统定位：** 该系统是老百姓大药房医保业务的合规管理中枢，核心职责是让门店在销售药品时遵守医保政策规则。系统通过规则配置引擎实现 9 类规则的灵活配置，再通过合理用药模块对处方进行合规审核，最终通过调用日志模块实现操作可追溯。
+
+**业务链路：**
+
+```plain
+规则配置（创建规则 → 关联药品/门店 → 启停管理）
+    ↓
+合理用药（处方审核 → 规则匹配 → 风险提示）
+    ↓
+调用日志（操作记录 → 数据导出 → 审计追溯）
+```
+
+---
+
+## 二、核心模块拆解
+### 2.1 医保规则配置引擎（核心模块）
+#### 2.1.1 业务流程
+```plain
+┌─────────────┐     ┌─────────────┐     ┌──────────────────┐     ┌──────────────┐
+│  卡片导航页   │────→│  规则列表页   │────→│  规则详情 / 新增弹窗 │────→│ 关联药品/门店  │
+│ index.vue    │     │ rulesTable   │     │  AddRule 组件     │     │ associatedDrugs │
+│              │     │              │     │                  │     │ relatedStores   │
+│ 按规则类型    │     │ 搜索/筛选    │     │ 表单/两步提交     │     │ 增删改查+导入导出│
+│ 展示卡片     │     │ 批量操作      │     │                  │     │                  │
+│              │     │ 状态切换      │     │                  │     │                  │
+└─────────────┘     └─────────────┘     └──────────────────┘     └──────────────┘
+       ↑                    ↑                      ↑                      ↑
+       │                    │                      │                      │
+  getListEnums()       getListRule()          ruleDetail()          addDrugSave()
+  (规则类型枚举)       (规则列表数据)        (规则详情数据)         addStoreSave()
+                                                                   exportExcelDrug()
+```
+
+**完整链路：**
+
+1. 用户从卡片导航页选择规则类型（如"药品诊断"），URL 写入 `key` 和 `keyName` 参数
+2. 规则列表页通过 `pageKey` 驱动多态渲染：不同规则类型展示不同表格列、不同搜索条件
+3. 点击"新增"弹出 AddRule 组件，根据规则类型动态渲染表单字段
+4. 门店级规则（regionScope === 5）采用两步提交：先提交规则，再绑定门店
+5. 规则详情页通过 `setRuleScope` 事件驱动父组件 Tab 显隐，决定是否展示"关联药品""关联门店"标签页
+
+#### 2.1.2 核心文件结构
+```plain
+src/views/rule-configuration/
+├── index.vue                    # 卡片导航页（154 行）
+├── rulesTable.vue               # 规则列表页（351 行）
+├── detailTabs.vue               # 三 Tab 容器（129 行）
+├── api.js                       # 接口层，15 个 API 函数（195 行）
+├── enumDictionary.js            # 枚举多态配置，6 个 switch 函数（197 行）
+├── components/
+│   ├── mixins.js                # 4 个通用 mixin（198 行）
+│   ├── FormTable/index.vue      # 通用表格容器（338 行）
+│   ├── associatedDrugs.vue      # 关联药品管理（826 行）
+│   ├── relatedStores.vue        # 关联门店管理（510 行）
+│   ├── ruleDetails.vue          # 规则详情展示（255 行）
+│   └── lisfrom.vue              # 规则配置子表单
+└── ...
+src/components/AddRule/index.vue # 规则新增/编辑弹窗（1446 行）— 最核心最复杂的组件
+```
+
+#### 2.1.3 核心技术实现
+**（1）枚举驱动的多态渲染**
+
+整个模块的多态性由 `enumDictionary.js` 中的 6 个 switch 函数集中驱动：
+
+```javascript
+// enumDictionary.js — 6 个 switch 函数管理 9 种规则类型在 6 个维度的差异
+
+// ① 规则列表表头
+export function rulesListColumn(ruleKey) {
+  switch (ruleKey) {
+    case drugTips:       return [{ prop: 'drugTipsType', label: '提示类型' }, ...]
+    case drugDiagnosis:  return [{ prop: 'diagnosisName', label: '诊断名称' }, ...]
+    case drugAmount:     return [{ prop: 'amountType', label: '金额类型' }, { prop: 'payType', label: '支付类型' }, ...]
+    case drugCycle:      return [{ prop: 'cycleType', label: '周期类型' }, ...]
+    // ... 9 种规则类型，各有不同的列配置
+  }
+}
+
+// ② 表格字段映射（状态码→文本、风险等级→文本）
+export function rulesTableDataMap(ruleKey, dataMap) {
+  dataMap.status = dataMap.status === 1 ? '已开启' : '未开启'
+  switch (dataMap.riskLevel) {
+    case 1: dataMap.riskLevel = '高级风险'; break
+    case 2: dataMap.riskLevel = '中级风险'; break
+    case 3: dataMap.riskLevel = '低级风险'; break
+    case 4: dataMap.riskLevel = '无风险'; break
+  }
+  return dataMap
+}
+
+// ③ Tab 标题（"诊断"/"提示"/"数量"/"周期"）
+export function drugsTextTab(ruleKey) { ... }
+
+// ④ 药品列表列配置
+export function drugsListColumn(ruleKey) { ... }
+
+// ⑤ 编辑表单字段标签
+export function drugsEditItem(ruleKey) { ... }
+
+// ⑥ 导出模板类型
+export function downloadDrugsType(ruleKey) { ... }
+```
+
+**设计决策：为什么用 switch 而不是策略模式？**
+
+> 9 种规则类型的差异点分散在 6 个维度（表头、字段映射、Tab 标题、列配置、表单标签、导出模板），每种规则在每个维度的配置都不同。策略模式适合"同一接口不同实现"，但这里是"同一个 key 在 6 个函数中各有不同配置"。switch 集中管理、一目了然，新增规则类型只需在 6 个函数中各加一个 case，比维护 9 个策略对象（每个对象 6 个方法）更直观。
+>
+
+**（2）URL 参数驱动的模块级通信**
+
+```javascript
+// index.vue — 卡片点击，URL 写入 key 和 keyName
+card2page(item) {
+  this.$router.push(
+    `/RuleConfiguration/RulesTable?key=${item.key}&keyName=${item.value}`
+  )
+}
+
+// rulesTable.vue — computed 自动响应 URL 变化
+computed: {
+  pageKey() { return this.$route.query.key },    // 驱动多态渲染
+  keyName() { return this.$route.query.keyName }  // 用于面包屑和导出文件名
+}
+```
+
+**设计决策：为什么用 URL 参数而不是 Vuex？**
+
+> 规则列表页需要支持浏览器前进/后退、刷新保持状态、直接分享链接。URL 参数天然满足这些需求，无需额外的状态持久化逻辑。pageKey 贯穿整个模块（列表→详情→关联药品→关联门店），所有组件都从 URL 读取，避免了逐层传递 props 的繁琐。
+>
+
+**（3）两步提交流程（门店级规则）**
+
+```javascript
+// AddRule/index.vue
+// regionScope 变化时，检测是否为门店级规则
+watch: {
+  regionScope(val) {
+    if (val === 5) {
+      this.showtak = true  // 显示"下一步"按钮
+    }
+  }
+}
+
+// submitForm() — 第一步：提交规则，获取 ruleId
+submitForm() {
+  const detailList = this.buildDetailList()  // 根据 pageKey 构建不同结构
+  addRule({
+    name: this.ruleName,
+    regionScope: this.regionScope,
+    detailList: detailList,
+    // ...
+  }).then(res => {
+    if (this.regionScope === 5) {
+      this.ruleId = res.data     // 拿到 ruleId
+      this.showtak = true        // 切换到门店上传表单
+    } else {
+      this.$emit('getlist')      // 非门店级，直接关闭并刷新列表
+    }
+  })
+}
+
+// 第二步：上传门店文件，用 ruleId 关联
+submitStore() {
+  addStoreSave({
+    ruleId: this.ruleId,
+    storeFile: this.uploadUrlFile,
+    operatorUser: `${this.loginName}(${this.loginId})`
+  }).then(res => {
+    this.$emit('getlist')
+  })
+}
+```
+
+**（4）postLoading 全局防抖机制**
+
+```javascript
+// mixins.js — dialogTaskOperation
+export const dialogTaskOperation = {
+  data() {
+    return {
+      postLoading: false,       // 防抖锁
+      dialogTaskRow: {},        // 当前操作行数据
+      dialogTaskName: '',       // 操作名称（"删除"/"启用"/"禁用"）
+      dialogTaskShow: false     // 确认弹窗显隐
+    }
+  },
+  methods: {
+    // 点击操作按钮 → 先检查锁 → 弹确认框
+    dialogTaskSubmit(rowData) {
+      if (this.postLoading) {
+        this.$message({ message: '操作中，请稍等...', type: 'warning' })
+        return
+      }
+      this.dialogTaskRow = rowData
+      this.dialogTaskShow = true
+    }
+  }
+}
+
+// 使用方（如 relatedStores.vue）
+async deleteRow(callback) {
+  if (this.postLoading) {
+    this.$message({ message: '正在删除中，请稍等...', type: 'warning' })
+    return
+  }
+  this.postLoading = true
+  await deleteRuleStore({ ... }).then(
+    () => { this.$message({ message: '删除成功！', type: 'success' }); this.getList() },
+    () => { this.$message({ message: '删除失败', type: 'warning' }) }
+  )
+  this.postLoading = false   // 无论成功失败都释放锁
+  callback()                 // 通知弹窗关闭
+}
+```
+
+**（5）动态防抖搜索**
+
+```javascript
+// mixins.js — frequentOperationEnd
+export const frequentOperationEnd = {
+  data() {
+    return {
+      debounceTimeout: null,
+      debouncing: false,
+      dTimeParse: null       // 上次请求时间戳
+    }
+  },
+  methods: {
+    debounceEvent(query) {
+      this.debouncing = true
+      const now = new Date().getTime()
+      // 动态延时：距上次请求不足 900ms 用剩余时间，超过则立即执行
+      const delay = this.dTimeParse
+        ? Math.max(0, 900 - (now - this.dTimeParse))
+        : 900
+      this.dTimeParse = now
+      if (this.debounceTimeout) clearTimeout(this.debounceTimeout)
+      this.debounceTimeout = setTimeout(() => {
+        this.debounceGet(query)
+      }, delay)
+    }
+  }
+}
+```
+
+**设计决策：为什么用动态延时？**
+
+> 固定 900ms 防抖在用户快速连续输入时体验不好——每次按键都要等 900ms。动态计算的逻辑是：记录上次请求时间戳 `dTimeParse`，计算 `900 - (now - dTimeParse)`。如果距上次请求不足 900ms，用剩余时间；如果已超过 900ms，立即执行。这样用户快速输入时保持防抖，停顿后立即响应。
+>
+
+**（6）120+ 行表单构建 switch（AddRule）**
+
+```javascript
+// AddRule/index.vue — submitForm() 中根据 pageKey 构建不同的 detailList
+switch (this.pageKey) {
+  case 'SPECIAL_DRUG_DIAGNOSIS':
+    detailList = [{
+      ruleAtomId: this.diagnosisType,
+      ruleAtomName: this.diagnosisLabel,
+      value: this.diagnosisName
+    }]
+    break
+  case 'SPECIAL_DRUG_TIPS':
+    detailList = [{
+      ruleAtomId: this.tipsType,
+      ruleAtomName: this.tipsLabel,
+      value: this.tipsValue
+    }]
+    break
+  case 'SPECIAL_SALE_NUM':
+    detailList = [{
+      ruleAtomId: this.saleNumType,
+      ruleAtomName: this.saleNumLabel,
+      value: this.saleNum
+    }]
+    break
+  case 'SPECIAL_DRUG_AMOUNT':
+    detailList = [{
+      ruleAtomId: this.amountType,
+      ruleAtomName: this.amountLabel,
+      value: this.maxAmount
+    }]
+    break
+  case 'SPECIAL_DRUG_AGE':
+    detailList = [{
+      ruleAtomId: this.ageType,
+      ruleAtomName: this.ageLabel,
+      value: `${this.staNumber},${this.endNumber}`  // 起始年龄,结束年龄
+    }]
+    break
+  case 'SPECIAL_DRUG_SEX':
+    detailList = [{
+      ruleAtomId: this.sexType,
+      ruleAtomName: this.sexLabel,
+      value: this.sexValue
+    }]
+    break
+  case 'SPECIAL_DRUG_CYCLE':
+    detailList = [{
+      ruleAtomId: this.cycleType,
+      ruleAtomName: this.cycleLabel,
+      value: this.cycleDays,
+      extValue: this.controlCycle  // 自定义/自然年/自然月
+    }]
+    break
+  case 'COMMON':
+    detailList = this.commonRules.map(item => ({
+      ruleAtomId: item.type,
+      ruleAtomName: item.label,
+      value: item.value
+    }))
+    break
+  // ... 共 9 种
+}
+```
+
+**（7）关联药品管理（associatedDrugs.vue — 826 行）**
+
+```javascript
+// 核心功能：5 种规则类型的药品关联管理
+// 1. 远程搜索药品（带防抖）
+async debounceGet(query) {
+  await getDrugList({ drugName: query }).then(res => {
+    this.drugOptions = res.map(item => ({
+      value: item.drugCode,
+      label: item.drugName
+    }))
+  })
+}
+
+// 2. 远程搜索诊断（独立防抖实例）
+async debounceGetDiagnosis(query) {
+  await getDiagnosisList({ diagnosisName: query }).then(res => {
+    this.diagnosisOptions = res.map(item => ({
+      value: item.diagnosisCode,
+      label: item.diagnosisName
+    }))
+  })
+}
+
+// 3. 提交时根据规则类型构建不同的 dataSave
+switch (this.pageKey) {
+  case 'SPECIAL_DRUG_DIAGNOSIS':
+    dataSave = {
+      drugCode: this.newForm.drugCode,
+      drugName: this.drugName,
+      diagnosisCode: this.newForm.diagnosisCode,
+      diagnosisName: this.diagnosisName
+    }
+    break
+  case 'SPECIAL_DRUG_CYCLE':
+    dataSave = {
+      drugCode: this.newForm.drugCode,
+      drugName: this.drugName,
+      controlCycle: this.controlCycle,        // 自定义/自然年/自然月
+      controlCycleVal: this.controlCycleVal,  // 天数
+      extValue: this.extValue
+    }
+    break
+  // ... 5 种规则类型各有不同的字段组合
+}
+```
+
+**（8）关联门店管理（relatedStores.vue — 510 行）**
+
+```javascript
+// 导出功能：动态构建文件名
+async exportStore() {
+  const loading = this.$loading({ lock: true, text: '导出文件中' })
+  await exportExcelStore({
+    ruleId: this.ruleId,
+    size: this.pageSize,
+    page: this.currentPage,
+    storeCodeName: this.formInline.name
+  }).then(response => {
+    let xlsName = '关联门店.xlsx'
+    if (this.formInline.name) {
+      xlsName = this.formInline.name + '_' + xlsName   // 搜索关键词
+    }
+    if (this.$route.query.keyName) {
+      xlsName = this.$route.query.keyName + '_' + xlsName  // 规则类型
+    }
+    if (this.$route.query.ruleName) {
+      xlsName = this.$route.query.ruleName + '_' + xlsName  // 规则名称
+    }
+    downloadBlob(response, xlsName, () => { loading.close() })
+  })
+}
+```
+
+**（9）detailTabs.vue — 子组件驱动父组件 Tab 显隐**
+
+```javascript
+// detailTabs.vue — 三 Tab 容器
+// Tab 可见性由子组件 ruleDetails 通过事件驱动
+<template>
+  <el-tabs v-model="activeName">
+    <el-tab-pane label="规则详情" name="ruleDetails">
+      <ruleDetails
+        :rule-id="ruleId"
+        :page-key="pageKey"
+        @setRuleScope="handleRuleScope"   // 子组件告知父组件规则的 regionScope 和 drugScope
+      />
+    </el-tab-pane>
+    <el-tab-pane
+      v-if="drugScope !== '2'"           // drugScope != 2 时显示"关联药品"
+      label="关联药品"
+      name="associatedDrugs"
+    >
+      <associatedDrugs :rule-id="ruleId" :page-key="pageKey" />
+    </el-tab-pane>
+    <el-tab-pane
+      v-if="ruleScope === '5'"           // regionScope == 5 时显示"关联门店"
+      label="关联门店"
+      name="relatedStores"
+    >
+      <relatedStores :rule-id="ruleId" />
+    </el-tab-pane>
+  </el-tabs>
+</template>
+methods: {
+  handleRuleScope({ regionScope, drugScope }) {
+    this.ruleScope = regionScope
+    this.drugScope = drugScope
+  }
+}
+```
+
+**设计决策：为什么让子组件驱动父组件的 Tab 显隐？**
+
+> 因为 regionScope 和 drugScope 是从规则详情接口获取的，父组件无法提前知道。如果父组件自己请求，会多一次接口调用。让子组件在获取详情后 emit 给父组件，既减少请求，又保证数据一致性。
+>
+
+#### 2.1.4 组件通信模式总结
+| 通信方向 | 方式 | 场景 | 示例 |
+| --- | --- | --- | --- |
+| 父→子 | props | 传递 ruleId、pageKey、editdata | `<associatedDrugs :rule-id="ruleId" />` |
+| 子→父 | $emit | 通知刷新、传递规则配置 | `@setRuleScope="handleRuleScope"` |
+| 跨组件 | URL params | pageKey 贯穿整个模块 | `this.$route.query.key` |
+| 全局状态 | Vuex | 登录信息、角色权限 | `mapGetters(['loginId', 'name'])` |
+| 混入复用 | mixins | 防抖、分页、上传下载、防重复 | `mixins: [dialogTaskOperation, ...]` |
+| 全局事件 | window.$bus | 跨组件事件通知 | `window.$bus.$emit('refresh')` |
+
+
+#### 2.1.5 边界场景处理
+**年龄校验：**
+
+```javascript
+// AddRule — 监听 staNumber / endNumber，处理 falsy 0 的问题
+watch: {
+  staNumber(val) {
+    // 修复前：if (this.staNumber && ...) — 0 是 falsy，会被误判
+    // 修复后：显式判断 null/undefined
+    if (val !== null && val !== undefined && (val < 0 || val > 150)) {
+      this.$message.warning('起始年龄需在 0-150 之间')
+      this.staNumber = 0
+    }
+  }
+}
+```
+
+**金额类型切换隐藏药品关联：**
+
+```javascript
+// monytypechange — 当金额原子为"总金额"时隐藏药品关联选项
+monytypechange(val) {
+  const hideIds = [28, 29, 30, 31, 32]  // 总金额类型 ID
+  this.showDrugScope = !hideIds.includes(val)
+}
+```
+
+**表单校验重置：**
+
+```javascript
+// 编辑打开弹窗时，先清除上次的校验状态
+openRule(item) {
+  this.rulebon = item
+  this.$nextTick(() => {
+    this.$refs.ruleForm.clearValidate()
+  })
+}
+```
+
+---
+
+### 2.2 CAS SSO 单点认证
+#### 2.2.1 认证流程
+```plain
+用户访问系统
+  ↓
+router.beforeEach 守卫拦截
+  ↓
+┌─ 有 Token？─→ 放行
+│
+└─ 无 Token
+     ↓
+   ┌─ URL 有 CAS ticket？─→ queryTicket() 手动解析
+   │                            ↓
+   │                      createTokenByTicket(ticket) 换取 JWT
+   │                            ↓
+   │                      getUserInfo() 获取用户信息 + 菜单权限
+   │                            ↓
+   │                      parserPermission() 递归过滤路由
+   │                            ↓
+   │                      router.addRoutes() 动态注册路由
+   │                            ↓
+   │                      hasPermission = true（一次性守卫）
+   │                            ↓
+   └─ CSS 平台 authorInfo？─→ Base64 解码用户信息
+                                ↓
+                              同上流程
+```
+
+#### 2.2.2 核心实现
+```javascript
+// src/permission.js — router.beforeEach
+let hasPermission = false  // 全局一次性守卫
+
+router.beforeEach(async (to, from, next) => {
+  if (hasPermission) {
+    next()
+    return
+  }
+
+  // 路径 1：CAS ticket 换 token
+  const ticket = queryTicket()
+  if (ticket) {
+    await getLoginId_or_token(ticket)   // ticket → JWT
+    await getUserInfo()                 // 获取用户信息 + 菜单
+    hasPermission = true
+    next({ ...to, replace: true })      // replace: true 避免回退到 CAS
+    return
+  }
+
+  // 路径 2：CSS 平台 Base64 authorInfo
+  const authorInfo = getAuthorInfoFromCSS()
+  if (authorInfo) {
+    // 解析 Base64 用户信息...
+    hasPermission = true
+    next({ ...to, replace: true })
+    return
+  }
+
+  // 无认证信息 → 跳转 CAS 登录页
+  window.location.href = CAS_LOGIN_URL
+})
+```
+
+```javascript
+// src/permission.js — 手动解析 CAS ticket
+function queryTicket() {
+  const url = window.location.href
+  const ticketMatch = url.match(/[?&]ticket=([^&]+)/)
+  return ticketMatch ? ticketMatch[1] : null
+}
+```
+
+```javascript
+// src/utils/permission.js — 递归过滤路由
+export function parserPermission(routes, menus) {
+  const tmp_arr = []
+  _.forEach(routes, function(v, i) {
+    _.forEach(menus, function(w, j) {
+      if (v.name === w.url) {                    // 路由 name === 菜单 url
+        const c_v = deepClone(v)                  // 深拷贝，避免污染原始路由
+        if (c_v.children && c_v.children.length > 0) {
+          c_v.children = parserPermission(c_v.children, menus)  // 递归过滤子路由
+        }
+        tmp_arr.push(c_v)
+      }
+    })
+  })
+  return tmp_arr
+}
+```
+
+**设计决策：为什么用双层 forEach 而不是 Map？**
+
+> 菜单数据量小（通常 < 100 条），路由表也有限，O(n²) 在这个量级下没有性能问题。且 lodash forEach 的链式调用让代码更简洁。如果用 Map，需要先构建菜单 Map，再遍历路由，代码量反而更多。
+>
+
+#### 2.2.3 双认证路径说明
+| 路径 | 触发条件 | token 来源 | 用户信息来源 |
+| --- | --- | --- | --- |
+| CAS SSO | URL 中有 `ticket` 参数 | `createTokenByTicket` 接口 | `getUserInfo` 接口 |
+| CSS 平台 | URL 中有 `authorInfo` 参数 | Base64 解码 | Base64 解码 |
+
+
+---
+
+### 2.3 合理用药规则管理
+#### 2.3.1 模块结构
+```plain
+src/views/rational-drug-use/
+├── data-entry.vue       # 卡片导航（复用规则配置引擎的模式）
+├── rationalTable.vue    # 规则列表
+└── api.js               # 接口层（独立 API 路径 /lbx-ms-biz-rational-drug）
+```
+
+#### 2.3.2 与医保规则配置引擎的关系
+| 维度 | 医保规则配置引擎 | 合理用药规则管理 |
+| --- | --- | --- |
+| 枚举类型 | `RULE_TYPE` | `RATIONAL_TYPE` |
+| API 路径 | `/lbx-ms-biz-compliance-manage` | `/lbx-ms-biz-rational-drug` |
+| 规则类型 | 9 种 | 3 种（药品与药品、药品与诊断、药品与人群） |
+| UI 模式 | 卡片→列表→详情 | 卡片→列表→详情（复用同一套模式） |
+| 核心差异 | 侧重规则配置和门店/药品关联 | 侧重处方审核和风险提示 |
+
+
+**设计决策：为什么合理用药模块没有复用规则配置引擎的代码？**
+
+> 两个模块虽然 UI 模式相似，但业务逻辑差异较大：规则配置引擎的表单构建有 120+ 行 switch，关联药品有 5 种规则类型的字段差异；合理用药的规则结构更简单，但审核逻辑更复杂。强行复用会导致抽象层过厚，维护成本反而更高。
+>
+
+---
+
+### 2.4 双 HTTP 客户端架构
+#### 2.4.1 实现
+```javascript
+// src/utils/request.js — 业务 API 客户端
+const service = axios.create({
+  baseURL: '/lbx-ms-biz-compliance-manage',
+  timeout: 30000
+})
+
+service.interceptors.response.use(response => {
+  const res = response.data
+  // 业务 API：code !== 0 视为错误
+  if (res.code !== 0) {
+    Message.error(res.message || '请求失败')
+    return Promise.reject(res)
+  }
+  return res.data
+})
+
+// src/utils/request_fwk.js — 组织权限 API 客户端
+const serviceFwk = axios.create({
+  baseURL: '/lbx-ms-biz-org-permission',
+  timeout: 30000
+})
+
+serviceFwk.interceptors.response.use(response => {
+  const res = response.data
+  // 组织权限 API：code !== 0 且 code !== 200 视为错误
+  if (res.code !== 0 && res.code !== 200) {
+    Message.error(res.message || '请求失败')
+    return Promise.reject(res)
+  }
+  return res.data
+})
+```
+
+#### 2.4.2 设计决策
+**为什么需要两个客户端？**
+
+> 对接的后端服务不同：业务 API（合规管理服务）统一用 `code === 0` 表示成功，组织权限 API（fwk 服务）用 `code === 200` 表示成功。两套约定无法统一，所以封装两个 axios 实例，各自处理错误码。调用方按需引入，无需关心后端差异。
+>
+
+---
+
+### 2.5 公共组件库（cc-element）
+| 组件 | 职责 | 行数 |
+| --- | --- | --- |
+| FormTable | 可复用表格容器，支持搜索槽、操作槽、分页 | 338 |
+| dialogAssociation | 通用弹窗（确认、提示、上传） | 120 |
+| AddRule | 9 种规则类型的统一新增/编辑弹窗 | 1446 |
+| associatedDrugs | 关联药品管理（5 种规则类型） | 826 |
+| relatedStores | 关联门店管理（CRUD + 导入导出） | 510 |
+| ruleDetails | 规则详情展示 | 255 |
+| lisfrom | 规则配置子表单 | 80 |
+
+
+**FormTable 组件设计：**
+
+```vue
+<!-- FormTable/index.vue — 通用表格容器 -->
+<template>
+  <div>
+    <!-- 搜索表单槽 -->
+    <el-card class="search-container">
+      <el-form :inline="true" :model="formInline">
+        <slot name="formInline" />
+        <el-form-item>
+          <el-button type="primary" @click="$emit('onSubmit')">查询</el-button>
+          <el-button @click="$emit('reset')">重置</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
+    <!-- 表格操作槽 -->
+    <slot name="tableOperation" />
+
+    <!-- 数据表格 -->
+    <el-table :data="tableData" v-loading="loading" @selection-change="handleSelectionChange">
+      <el-table-column v-if="hasSelection" type="selection" reserve-selection />
+      <el-table-column v-for="item in headerTitles" :key="item.prop" :prop="item.prop" :label="item.title" />
+      <el-table-column label="操作">
+        <template slot-scope="{ row }">
+          <slot name="rowOperation" :rowData="row" />
+        </template>
+      </el-table-column>
+    </el-table>
+    <!-- 分页 -->
+    <el-pagination
+      :current-page="currentPage"
+      :page-sizes="[20, 50, 100, 200]"
+      :page-size="pageSize"
+      :total="totalRows"
+      @size-change="$emit('handleSizeChange', $event)"
+      @current-change="$emit('handleCurrentChange', $event)"
+    />
+  </div>
+</template>
+
+```
+
+---
+
+## 三、技术架构亮点
+### 3.1 枚举驱动的多态渲染
+**问题：** 9 种规则类型，每种在表头、字段映射、Tab 标题、列配置、表单标签、导出模板 6 个维度都有差异，如何避免大量 if-else 散落在各组件中？
+
+**方案：** 集中在 `enumDictionary.js` 中用 6 个 switch 函数统一管理，每个函数接收 `ruleKey` 参数，返回对应配置。组件只需调用 `rulesListColumn(this.pageKey)` 获取配置。
+
+```javascript
+// 组件中使用
+export default {
+  computed: {
+    columns() { return rulesListColumn(this.pageKey) },
+    tabTitle() { return drugsTextTab(this.pageKey) }
+  }
+}
+```
+
+**效果：** 新增规则类型只需在 6 个函数中各加一个 case，新增一个文件。组件代码与规则类型解耦，无需修改已有组件。整个模块的多态性集中在一个文件（197 行）中管理，而不是分散在 10+ 个组件中。
+
+### 3.2 Mixin 组合的代码复用
+**问题：** 多个列表页（规则列表、关联药品、关联门店）都有防抖搜索、分页、弹窗操作、上传下载等功能，如何避免重复代码？
+
+**方案：** 将通用功能拆为 4 个 mixin：
+
+| Mixin | 职责 | 提供的能力 |
+| --- | --- | --- |
+| `dialogTaskOperation` | 弹窗操作防抖 | postLoading 锁、dialogTaskRow/Name/Show 状态、dialogTaskSubmit 方法 |
+| `uploadDownloadFile` | Excel 上传下载 | FormData 构建、blob 下载、loading 遮罩、errorTipList 展示 |
+| `tablePagination` | 分页状态管理 | totalRows/pageSize/currentPage 状态、handleSizeChange 方法 |
+| `frequentOperationEnd` | 动态防抖搜索 | debounceTimeout、debouncing、dTimeParse 状态、debounceEvent 方法 |
+
+
+**效果：** 组件通过 `mixins: [dialogTaskOperation, uploadDownloadFile, tablePagination, frequentOperationEnd]` 一行代码获得全部能力，组件自身只写业务逻辑。以 `relatedStores.vue` 为例，510 行中有 198 行来自 mixin，实际业务代码只有 312 行。
+
+### 3.3 两步提交的表单流程
+**问题：** 门店级规则需要先创建规则拿到 ruleId，再用 ruleId 关联门店。一次性提交无法满足，跳转页面又打断用户流程。
+
+**方案：** AddRule 组件内部维护 `showtak` 状态，regionScope === 5 时按钮变为"下一步"。第一步提交规则获取 ruleId，第二步切换到门店上传表单，无需跳转页面。
+
+```plain
+┌─────────────────────────────────────────────────────┐
+│  AddRule 弹窗                                         │
+│                                                       │
+│  ┌─ showtak = false ─┐   ┌─ showtak = true ─────┐   │
+│  │  规则表单           │   │  门店上传表单          │   │
+│  │  [下一步] 按钮      │──→│  [提交] 按钮          │   │
+│  └────────────────────┘   └───────────────────────┘   │
+│                                                       │
+└─────────────────────────────────────────────────────┘
+```
+
+**效果：** 用户体验流畅，无需跳转页面；组件内部自包含，外部调用方只需监听 `@getlist` 事件刷新列表，无需感知两步逻辑。
+
+### 3.4 URL 参数驱动的状态管理
+**问题：** 规则列表页需要支持刷新保持状态、浏览器前进后退、URL 分享。如果用 Vuex，需要额外的持久化逻辑。
+
+**方案：** 用 `$route.query.key` 和 `$route.query.keyName` 作为模块级状态源，computed 属性自动响应 URL 变化。
+
+```javascript
+// 所有组件统一从 URL 读取
+computed: {
+  pageKey() { return this.$route.query.key },
+  keyName() { return this.$route.query.keyName }
+}
+```
+
+**效果：** 零额外代码实现状态持久化，用户体验与传统多页应用一致。pageKey 贯穿整个模块（列表→详情→关联药品→关联门店），所有组件都从 URL 读取，避免了逐层传递 props 的繁琐。
+
+### 3.5 双 HTTP 客户端适配异构后端
+**问题：** 业务 API 和组织权限 API 的成功码约定不同（0 vs 200），无法统一。
+
+**方案：** 封装两个 axios 实例，各自配置拦截器，组件按需引入。
+
+```javascript
+// 业务 API
+import request from '@/utils/request'
+export function getListRule(params) { return request({ url: '/rule/list', params }) }
+
+// 组织权限 API
+import requestFwk from '@/utils/request_fwk'
+export function findResourceByUserId(params) { return requestFwk({ url: '/resource/find', params }) }
+```
+
+**效果：** 调用方无需关心后端差异，统一用 `then/catch` 处理响应。错误码差异被封装在拦截器中，业务代码完全无感知。
+
+---
+
+## 四、Bug 修复案例
+### 4.1 浮点数精度丢失（commit 0792ae0）
+**现象：** `medicareFee + medSelfFee` 结果为 `0.30000000000000004`，导致金额校验失败，用户无法提交。
+
+**根因：** JavaScript 浮点数运算固有精度问题，IEEE 754 双精度浮点数无法精确表示 0.1，`0.1 + 0.2 !== 0.3`。
+
+**修复：** 使用整数缩放，乘以 `Math.pow(10, 4)` 转为整数运算，再除回去。
+
+```javascript
+// 修复前
+const total = medicareFee + medSelfFee  // 0.30000000000000004
+
+// 修复后
+const factor = Math.pow(10, 4)
+const total = (Math.round(medicareFee * factor) + Math.round(medSelfFee * factor)) / factor  // 0.3
+```
+
+**收获：** 涉及金额的运算必须用整数缩放或 Decimal 库，不能直接用浮点数。这是前端最常见的精度陷阱之一。
+
+### 4.2 年龄 0 被误判为无效（9 次提交修复）
+**现象：** 输入起始年龄 0，表单提示"请输入年龄"，无法提交。
+
+**根因：** `this.staNumber && ...` 中，JavaScript 的 `0` 是 falsy 值，条件为 false，导致校验逻辑被跳过。
+
+**修复：**
+
+```javascript
+// 修复前
+if (this.staNumber && this.staNumber >= 0 && this.staNumber <= 150) { ... }
+
+// 修复后
+if (this.staNumber !== null && this.staNumber !== undefined && this.staNumber >= 0 && this.staNumber <= 150) { ... }
+```
+
+**收获：** JavaScript 的 falsy 值（0、''、null、undefined、NaN、false）在条件判断中都表现为 false。涉及数值校验时，必须显式区分"未输入"和"输入了 0"。这个 bug 反复修了 9 次，说明对 falsy 值的理解不够深入。
+
+### 4.3 门店导出 loading 永久锁定（commit 18e342d）
+**现象：** 导出门店文件后，再次点击导出按钮无反应，页面一直显示"导出中"。
+
+**根因：** `this.postLoading = true` 后，在异常路径（接口报错、网络超时）没有执行 `this.postLoading = false`，导致锁永久生效。
+
+**修复：**
+
+```javascript
+// 修复前
+async exportStore() {
+  this.postLoading = true
+  await exportExcelStore({ ... }).then(
+    (response) => { /* 成功 */ this.postLoading = false },
+    () => { /* 失败 */ }  // 忘记释放锁
+  )
+}
+
+// 修复后
+async exportStore() {
+  this.postLoading = true
+  try {
+    const response = await exportExcelStore({ ... })
+    // 处理成功...
+  } catch (error) {
+    // 处理失败...
+  } finally {
+    this.postLoading = false  // 所有路径都释放锁
+  }
+}
+```
+
+**收获：** 状态锁必须在所有路径（成功、失败、异常）中释放，用 try-finally 保证。这是防御性编程的基本原则。
+
+### 4.4 隐式类型转换导致逻辑漏洞（commit 51c52e4）
+**现象：** `Number(null)` 返回 `0`，`Number("N/A")` 返回 `NaN`，`NaN < 0` 返回 `false`，导致非法值通过校验。
+
+**根因：** 直接用 `Number()` 转换未知类型输入，没有处理 null 和非数字字符串。
+
+**修复：**
+
+```javascript
+// 修复前
+if (Number(val) < 0) {
+  this.$message.warning('值不能为负数')
+  return
+}
+
+// 修复后
+if (val == null) return                    // null/undefined 直接跳过
+const num = Number(val)
+if (Number.isNaN(num)) {                   // 非数字字符串
+  this.$message.warning('请输入有效数字')
+  return
+}
+if (num < 0) {
+  this.$message.warning('值不能为负数')
+  return
+}
+```
+
+**收获：** `Number()` 的转换规则比预期复杂得多：
+
+| 输入 | Number() 结果 |
+| --- | --- |
+| `null` | `0` |
+| `undefined` | `NaN` |
+| `""` | `0` |
+| `"abc"` | `NaN` |
+| `"123"` | `123` |
+| `true` | `1` |
+| `false` | `0` |
+
+
+必须逐个处理边界情况，不能假设输入类型。
+
+### 4.5 药品数据污染（commit 3378b5a）
+**现象：** 选择药品后，下拉选项中该药品名称被修改，显示异常。
+
+**根因：** 直接修改了 API 返回对象的 `drugName` 属性。Vue 的响应式系统检测到对象属性变化后，更新了引用同一对象的下拉列表。
+
+**修复：**
+
+```javascript
+// 修复前（直接修改原始数据）
+changeDrug(val) {
+  const drug = this.drugOptions.find(item => item.drugCode === val)
+  this.newForm.drugName = drug.drugName  // 修改了原始对象
+}
+
+// 修复后（用独立变量存储）
+changeDrug(val) {
+  const drug = this.drugOptions.find(item => item.drugCode === val)
+  this.drugName = drug.drugName  // 存到组件 data，不修改原始对象
+}
+```
+
+**收获：** 永远不要直接修改 API 返回的数据，用独立变量存储派生状态。Vue 的响应式系统会追踪对象引用，修改原始数据会波及所有引用该对象的地方。
+
+### 4.6 v-model 绑定错误（commit 66671ae）
+**现象：** 控制类型下拉框选择后，表单校验始终不通过，提示"请选择控制类型"。
+
+**根因：** `v-model="yuanid"` 绑定了一个无关变量，而不是 `v-model="ruleForm.controlType"`。表单校验检查的是 `ruleForm.controlType`，但用户操作的是 `yuanid`，两者互不关联。
+
+**修复：**
+
+```vue
+<!-- 修复前 -->
+<el-select v-model="yuanid">
+
+<!-- 修复后 -->
+<el-select v-model="ruleForm.controlType">
+```
+
+**收获：** v-model 绑定错误不会报错，只是静默失败——用户看到选中了值，但表单数据没有变化。表单校验不通过时，先检查 v-model 绑定是否正确。
+
+### 4.7 空值合并运算符误用（commit e380870）
+**现象：** 接口返回空数据时，列表显示 undefined，页面报错。
+
+**根因：**
+
+```javascript
+// 错误写法
+const { data } = await api() ?? { data: [] }
+```
+
+`??` 是对整个 `await api()` 的结果求值，而 `await api()` 返回的是一个对象（即使 data 为空），对象是 truthy，所以 `??` 永远不会触发。
+
+**修复：**
+
+```javascript
+// 正确写法：解构默认值
+const { data = [] } = await api()
+```
+
+**收获：** `??` 是对整个表达式求值，不是对解构结果求值。解构默认值 `= []` 才是正确的用法。两者的行为差异：
+
+```javascript
+const { data } = null ?? { data: [] }        // data = []（?? 生效）
+const { data } = { data: undefined } ?? { data: [] }  // data = undefined（?? 不生效）
+const { data = [] } = { data: undefined }    // data = []（解构默认值生效）
+```
+
+---
+
+## 五、面试 Q&A
+### 5.1 项目总览
+#### Q1：请介绍一下这个项目的核心业务和技术架构
+**A：** 这是老百姓大药房的医保合规管理系统，核心是规则配置引擎。业务上覆盖 9 种医保规则（药品诊断、销售次数、金额限制、年龄限制等），支撑全国门店的合规运营。技术上基于 Vue 2 + Element UI，核心设计是枚举驱动的多态渲染——6 个 switch 函数集中管理 9 种规则类型在表头、字段映射、Tab 标题等 6 个维度的差异。URL 参数作为模块级状态源，computed 属性自动响应变化，零代码实现刷新保持和前进后退。
+
+**追问：** 为什么选择 Vue 2 而不是 Vue 3？
+
+**A：** 项目启动时（2024.11），公司技术栈统一是 Vue 2，Element UI 的私有 Fork（@lbx/element-ui 2.16.3）只支持 Vue 2。升级 Vue 3 需要同步升级整个组件库和周边生态，成本太高，收益不明显。而且项目的核心挑战在业务逻辑复杂度，不在框架版本。
+
+---
+
+### 5.2 架构设计
+#### Q2：为什么选择 switch 而不是策略模式来管理规则类型？
+**A：** 因为差异点分散在 6 个维度，不是单一行为的变化。策略模式适合"同一接口不同实现"的场景，但这里是"同一个 key 在 6 个函数中各有不同配置"。switch 的优势是集中管理、一目了然，新增规则类型只需在 6 个函数中各加一个 case。如果用策略模式，需要维护 9 个策略对象，每个对象有 6 个方法，反而更分散。
+
+**追问：** 如果规则类型增加到 20 种，你还会用 switch 吗？
+
+**A：** 会考虑改为配置对象。把 6 个 switch 函数改为一个 Map：
+
+```javascript
+const ruleConfig = {
+  'SPECIAL_DRUG_DIAGNOSIS': {
+    columns: [...],
+    dataMap: {...},
+    tabTitle: '诊断',
+    // ...
+  },
+  // ...
+}
+```
+
+新增规则类型只需加配置项，不改函数。但目前 9 种规则类型，switch 的可读性和维护成本是可接受的。
+
+#### Q3：URL 参数驱动的状态管理有什么局限性？
+**A：** 主要局限是 URL 长度有限制（约 2000 字符），不适合存储复杂对象。所以 pageKey 和 keyName 这种简单的字符串用 URL 参数，而表单数据、选中状态等复杂数据仍然用组件内部 data。另外，URL 参数的变化会触发组件重新渲染，如果参数变化频繁，需要考虑性能优化（如 debounce）。
+
+**追问：** 那如果需要在多个页面间共享复杂状态，你会怎么做？
+
+**A：** 用 Vuex。比如用户的登录信息、角色权限这些全局状态，就是存在 Vuex 中的。URL 参数适合模块级的简单状态，Vuex 适合跨模块的复杂状态。两者各有适用场景，不冲突。
+
+---
+
+### 5.3 组件设计
+#### Q4：detailTabs.vue 中子组件驱动父组件 Tab 显隐的设计是怎么考虑的？
+**A：** 因为 regionScope 和 drugScope 是从规则详情接口获取的，父组件无法提前知道。如果父组件自己请求，会多一次接口调用，而且和子组件的请求重复。让子组件在获取详情后 emit 给父组件，既减少请求，又保证数据一致性。
+
+**追问：** 这种设计有什么缺点？
+
+**A：** 缺点是父组件的渲染依赖子组件的异步事件，如果子组件加载慢，Tab 会延迟显示。解决方式可以是父组件先请求一个轻量级接口获取 regionScope 和 drugScope，子组件再请求完整详情。但目前的场景下，子组件加载很快，延迟可以忽略。
+
+#### Q5：postLoading 防抖机制是怎么实现的？为什么不用 lodash debounce？
+**A：** postLoading 是通过 mixin 注入的布尔状态锁。所有增删改操作在执行前检查 postLoading，如果为 true 则提示"操作中，请稍等"并 return。操作开始时设为 true，完成（无论成功失败）后设为 false。
+
+不用 lodash debounce 的原因是：debounce 是"延迟执行"，而 postLoading 是"阻止执行"。debounce 适合搜索输入这种高频触发的场景，postLoading 适合按钮点击这种需要明确反馈的场景——用户点击后应该立即看到"操作中"的提示，而不是静默忽略。
+
+**追问：** 那动态防抖搜索又是怎么回事？
+
+**A：** 动态防抖搜索用在远程搜索（如药品搜索、门店搜索）上。固定 900ms 防抖在用户快速连续输入时体验不好——每次按键都要等 900ms。动态延时的逻辑是：记录上次请求时间戳 `dTimeParse`，计算 `900 - (now - dTimeParse)`。如果距上次请求不足 900ms，用剩余时间；如果已超过 900ms，立即执行。这样用户快速输入时保持防抖，停顿后立即响应。
+
+---
+
+### 5.4 数据处理
+#### Q6：枚举值的映射是怎么处理的？
+**A：** 有两种场景。一种是列表数据的映射（如 status 1→"已开启"），在 `rulesTableDataMap` 的 switch 中处理。另一种是下拉选项的映射，通过 `getListEnums({ enumKey: 'SERVICE_TYPE' })` 从接口获取枚举列表，然后用 `find` 匹配：
+
+```javascript
+res.serviceType = descEnums.find(
+  item => item?.key?.toString() === res?.serviceType?.toString()
+)?.value || res.serviceType
+```
+
+注意 `toString()` 的处理——接口返回的 key 可能是数字，而枚举列表的 key 是字符串，需要统一类型后比较。
+
+**追问：** 为什么不把枚举缓存起来？
+
+**A：** 枚举数据量小（通常 < 20 条），接口响应快（< 50ms），缓存的收益不明显。而且枚举值可能在后台被修改，缓存会导致数据不一致。如果后续发现接口响应慢，可以考虑用 Vuex 缓存 + 过期时间策略。
+
+#### Q7：Excel 导入导出是怎么实现的？
+**A：** 导出用 blob 下载，导入用 FormData 上传。
+
+```javascript
+// 导出
+exportExcelStore({ ruleId, size, page }).then(response => {
+  downloadBlob(response, '关联门店.xlsx')  // response 是 blob 对象
+})
+
+// 导入
+const formData = new FormData()
+formData.append('file', file.file)
+uploadExcelFile(formData).then(res => {
+  this.uploadUrlFile = res.data  // 返回文件 URL
+})
+```
+
+导入还有错误提示：接口返回 `errorTipList`，弹窗展示每条错误信息，提示用户修正后重新上传。
+
+**追问：** 大文件导出会不会有问题？
+
+**A：** 会。如果数据量很大（如 10 万条），blob 下载会导致浏览器内存占用过高。目前的解决方案是分页导出——接口按页返回数据，前端合并后下载。如果数据量继续增大，可以考虑后端异步生成文件 + 前端轮询下载链接的方式。
+
+---
+
+### 5.5 认证与权限
+#### Q8：CAS SSO 认证流程中有什么技术难点？
+**A：** 难点在 ticket 的获取和路由的动态注册。ticket 通过手动解析 URL 获取（`queryTicket()`），因为 CAS 回调的 URL 格式不标准，无法用 `URLSearchParams` 直接解析。路由注册用 `parserPermission()` 递归过滤 `asyncRoutes`，匹配菜单权限后调用 `router.addRoutes()`。用全局 `hasPermission` 变量保证只执行一次，防止路由重复注册。
+
+**追问：** 为什么不用 JWT 的过期时间来判断是否需要重新登录？
+
+**A：** 因为 JWT 存在 localStorage 中，用户可能在多个标签页打开系统。如果一个标签页的 JWT 过期了，其他标签页还在用旧的 JWT。用 `hasPermission` 变量可以在每次页面加载时检查认证状态，比 JWT 过期时间更可靠。而且 CAS 的 session 管理是后端控制的，前端不需要自己判断过期。
+
+---
+
+### 5.6 踩坑与反思
+#### Q9：你在这个项目中踩过最深的坑是什么？
+**A：** 隐式类型转换导致的逻辑漏洞。用户输入"0"年龄时，`Number(null)` 返回 0，`Number("N/A")` 返回 NaN，`NaN < 0` 返回 false，导致非法值通过校验。这个问题暴露了 JavaScript 类型系统的复杂性——`Number()` 的转换规则（null→0、undefined→NaN、""→0）比预期复杂得多。修复方案是显式处理 null/undefined，用 `Number.isNaN()` 检查转换结果。这个 bug 让我养成了"永远不要信任外部输入的类型"的习惯。
+
+**追问：** 这个 bug 反映了什么更深层的问题？
+
+**A：** 反映了两个问题：一是缺乏输入层的类型校验，直接把用户输入丢给 `Number()` 转换；二是缺乏单元测试，如果有测试覆盖 `Number(null)` 的边界情况，这个 bug 在开发阶段就能发现。后续我在表单校验中统一加了类型检查，并推动团队在关键路径上补充单元测试。
+
+#### Q10：如果让你重构这个项目，你会改什么？
+**A：** 三个方向：
+
+1. **枚举配置数据化**：把 6 个 switch 函数改为配置对象，用 `ruleTypeMap[ruleKey].columns` 代替 `rulesListColumn(ruleKey)`，新增规则类型只需加配置项，不改函数。
+2. **表单组件拆分**：AddRule 有 1446 行，9 种规则类型的表单逻辑耦合在一个组件里。可以拆为 9 个子表单组件，AddRule 只负责调度。
+3. **TypeScript 化**：当前全是 JS，枚举值、API 响应、表单数据都没有类型约束，很多 bug（如 v-model 绑定错误、隐式类型转换）在编译期就能发现。
+
+**追问：** 这三个方向的优先级怎么排？
+
+**A：** TypeScript 化 > 表单组件拆分 > 枚举配置数据化。TypeScript 的收益最大——类型系统能预防大部分隐式类型转换和绑定错误，这是项目中最高频的 bug 类型。表单组件拆分的收益次之——1446 行的组件维护成本高，拆分后每个子组件 200 行左右，可读性和可测试性都大幅提升。枚举配置数据化的收益最小——目前 switch 的可读性还可以接受，不是紧迫问题。
