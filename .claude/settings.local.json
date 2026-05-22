@@ -15,7 +15,19 @@
       "Bash(npx vite *)",
       "Bash(npm run *)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173)",
-      "Bash(npm uninstall *)"
+      "Bash(npm uninstall *)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //F //PID 28712)",
+      "Bash(curl -s http://localhost:4173)",
+      "Bash(kill %1)",
+      "Bash(cat vite.config.ts)",
+      "Bash(cat vite.config.js)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(gh auth *)",
+      "Bash(winget install *)",
+      "Bash(npx netlify-cli *)"
     ]
   }
 }
