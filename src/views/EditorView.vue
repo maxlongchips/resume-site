@@ -15,10 +15,6 @@ function printResume() {
   <div class="editor-shell">
     <!-- Toolbar -->
     <div class="editor-toolbar">
-      <div class="toolbar-left">
-        <router-link to="/" class="back-link">&#8592; 保存并返回</router-link>
-        <span class="toolbar-title">简历编辑器</span>
-      </div>
       <div class="toolbar-actions">
         <button class="tb" @click="store.addAbout">+ 简介</button>
         <button class="tb" @click="store.addExperience">+ 经历</button>
@@ -111,6 +107,16 @@ function printResume() {
               <div class="r-exp-ach" v-if="exp.achievements">
                 <RichTextEditor v-model="exp.achievements" />
               </div>
+              <div class="r-field">
+                <span class="r-field-label">技术栈：</span>
+                <div class="r-tag-list">
+                  <span v-for="(tech, ti) in exp.techStack" :key="ti" class="r-tag-chip">
+                    {{ tech }}
+                    <button class="r-tag-remove" @click="exp.techStack.splice(ti, 1)">×</button>
+                  </span>
+                  <button class="r-tag-add" @click="exp.techStack.push('新技术')">+ 技术栈</button>
+                </div>
+              </div>
             </div>
           </BlockWrapper>
         </section>
@@ -157,31 +163,20 @@ function printResume() {
                 <RichTextEditor v-model="proj.responsibilities" />
               </div>
 
-              <div class="r-field" v-if="proj.challenges.length">
-                <span class="r-field-label">难点与解决方案：</span>
-                <div v-for="(ch, ci) in proj.challenges" :key="ci" class="r-star">
-                  <div class="r-star-row">
-                    <span class="r-star-tag">S</span>
-                    <RichTextEditor v-model="ch.situation" />
-                  </div>
-                  <div class="r-star-row">
-                    <span class="r-star-tag">T</span>
-                    <RichTextEditor v-model="ch.task" />
-                  </div>
-                  <div class="r-star-row">
-                    <span class="r-star-tag">A</span>
-                    <RichTextEditor v-model="ch.action" />
-                  </div>
-                  <div class="r-star-row">
-                    <span class="r-star-tag">R</span>
-                    <RichTextEditor v-model="ch.result" />
-                  </div>
-                </div>
-              </div>
-
               <div class="r-field" v-if="proj.achievements">
                 <span class="r-field-label">成果与沉淀：</span>
                 <RichTextEditor v-model="proj.achievements" />
+              </div>
+
+              <div class="r-field">
+                <span class="r-field-label">标签：</span>
+                <div class="r-tag-list">
+                  <span v-for="(tag, ti) in proj.tags" :key="ti" class="r-tag-chip">
+                    {{ tag }}
+                    <button class="r-tag-remove" @click="proj.tags.splice(ti, 1)">×</button>
+                  </span>
+                  <button class="r-tag-add" @click="proj.tags.push('新标签')">+ 标签</button>
+                </div>
               </div>
             </div>
           </BlockWrapper>
@@ -247,7 +242,7 @@ function printResume() {
    WORKSPACE — dark surround
    ============================== */
 .editor-shell {
-  min-height: 100vh;
+  min-height: 100%;
   background: #18181b;
   padding-bottom: 60px;
 }
@@ -259,35 +254,10 @@ function printResume() {
   z-index: 100;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 10px 24px;
   background: #18181b;
   border-bottom: 1px solid #27272a;
-}
-
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.back-link {
-  color: #a1a1aa;
-  text-decoration: none;
-  font-family: var(--font-sans);
-  font-size: 13px;
-  transition: color 0.15s;
-}
-
-.back-link:hover {
-  color: #e4e4e7;
-}
-
-.toolbar-title {
-  font-family: var(--font-sans);
-  font-size: 14px;
-  color: #71717a;
-  letter-spacing: 0.02em;
 }
 
 .toolbar-actions {
@@ -527,40 +497,55 @@ function printResume() {
   margin-bottom: 4px;
 }
 
-/* STAR */
-.r-star {
-  margin: 6px 0 12px 0;
-  padding: 10px 12px;
-  background: #f8fafc;
-  border-radius: 6px;
-  border-left: 3px solid #cbd5e1;
-}
-
-.r-star-row {
+/* Tags */
+.r-tag-list {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  margin-bottom: 5px;
-}
-
-.r-star-row:last-child {
-  margin-bottom: 0;
-}
-
-.r-star-tag {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  color: #475569;
-  background: #e2e8f0;
-  width: 20px;
-  height: 20px;
-  border-radius: 4px;
-  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  margin-top: 2px;
+}
+
+.r-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 3px;
+  background: #f1f5f9;
+  color: #475569;
+  font-family: var(--font-mono);
+}
+
+.r-tag-remove {
+  border: none;
+  background: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.r-tag-remove:hover {
+  color: #ef4444;
+}
+
+.r-tag-add {
+  border: 1px dashed #d1d5db;
+  background: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 3px;
+  font-family: var(--font-sans);
+  transition: all 0.15s;
+}
+
+.r-tag-add:hover {
+  border-color: #94a3b8;
+  color: #475569;
 }
 
 /* ==============================
@@ -568,7 +553,7 @@ function printResume() {
    ============================== */
 .r-skills-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
 }
 
@@ -723,66 +708,3 @@ function printResume() {
 }
 </style>
 
-<!-- UNSCOPED: print must target html/body/#app which don't carry scoped attrs -->
-<style>
-@page {
-  margin: 0mm;
-  size: A4;
-}
-
-@media print {
-  html, body, #app {
-    height: auto !important;
-    overflow: visible !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: #ffffff !important;
-  }
-
-  body::before {
-    display: none !important;
-  }
-
-  .editor-toolbar {
-    display: none !important;
-  }
-
-  .editor-shell {
-    background: #ffffff !important;
-    padding: 0 !important;
-    min-height: auto !important;
-  }
-
-  .a4-viewport {
-    padding: 0 !important;
-  }
-
-  .a4-paper {
-    width: 100% !important;
-    min-height: auto !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
-    padding: 12mm 16mm !important;
-    background: #ffffff !important;
-    color: #1e293b !important;
-  }
-
-  .block-wrapper {
-    background: transparent !important;
-  }
-
-  .block-toolbar {
-    display: none !important;
-  }
-
-  .rte-wrap .tiptap:hover {
-    background: transparent !important;
-  }
-
-  .r-name, .f-name { color: #0f172a !important; }
-  .r-h2 { color: #0f172a !important; }
-  .r-divider, .r-footer-line { background: #e2e8f0 !important; }
-  .r-star { background: #f8fafc !important; border-left-color: #cbd5e1 !important; }
-  .r-star-tag { background: #e2e8f0 !important; color: #475569 !important; }
-}
-</style>

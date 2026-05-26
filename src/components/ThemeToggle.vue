@@ -1,16 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 
 type Theme = 'warm-dark' | 'cool-dark' | 'warm-light' | 'cool-light'
 
-const themes: { id: Theme; label: string; icon: string }[] = [
-  { id: 'warm-dark', label: '暖夜', icon: '☽' },
-  { id: 'cool-dark', label: '冷夜', icon: '☾' },
-  { id: 'warm-light', label: '暖日', icon: '☼' },
-  { id: 'cool-light', label: '冷日', icon: '☀' },
-]
-
 const current = ref<Theme>('warm-dark')
+
+const isDark = computed(() => current.value.includes('dark'))
 
 function setTheme(theme: Theme) {
   current.value = theme
@@ -18,62 +13,59 @@ function setTheme(theme: Theme) {
   localStorage.setItem('theme', theme)
 }
 
+function toggle() {
+  if (isDark.value) {
+    setTheme('warm-light')
+  } else {
+    setTheme('warm-dark')
+  }
+}
+
 onMounted(() => {
   const saved = localStorage.getItem('theme') as Theme | null
-  if (saved && themes.some(t => t.id === saved)) {
+  if (saved && ['warm-dark', 'cool-dark', 'warm-light', 'cool-light'].includes(saved)) {
     setTheme(saved)
   }
 })
 </script>
 
 <template>
-  <div class="theme-toggle">
-    <button
-      v-for="t in themes"
-      :key="t.id"
-      class="theme-btn"
-      :class="{ active: current === t.id }"
-      :title="t.label"
-      @click="setTheme(t.id)"
-    >
-      {{ t.icon }}
-    </button>
-  </div>
+  <button class="theme-toggle" :title="isDark ? '切换到亮色模式' : '切换到暗色模式'" @click="toggle">
+    <svg v-if="isDark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2" />
+      <path d="M12 20v2" />
+      <path d="m4.93 4.93 1.41 1.41" />
+      <path d="m17.66 17.66 1.41 1.41" />
+      <path d="M2 12h2" />
+      <path d="M20 12h2" />
+      <path d="m6.34 17.66-1.41 1.41" />
+      <path d="m19.07 4.93-1.41 1.41" />
+    </svg>
+    <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" />
+    </svg>
+  </button>
 </template>
 
 <style scoped>
 .theme-toggle {
   display: flex;
   align-items: center;
-  gap: 2px;
-  margin-left: auto;
-  padding-right: 12px;
-}
-
-.theme-btn {
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
   justify-content: center;
-  border: 1px solid transparent;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
   background: transparent;
-  color: var(--text-muted);
+  color: var(--text-dim);
   cursor: pointer;
-  font-size: 14px;
-  transition: all 0.2s;
-  border-radius: 4px;
+  transition: all 0.15s ease;
 }
 
-.theme-btn:hover {
+.theme-toggle:hover {
   color: var(--text);
   background: var(--accent-subtle);
-  border-color: var(--border);
-}
-
-.theme-btn.active {
-  color: var(--accent);
-  background: var(--accent-subtle);
-  border-color: var(--accent);
+  border-color: var(--border-hover);
 }
 </style>

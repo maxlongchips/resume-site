@@ -27,7 +27,10 @@
       "mcp__plugin_context7_context7__query-docs",
       "Bash(gh auth *)",
       "Bash(winget install *)",
-      "Bash(npx netlify-cli *)"
+      "Bash(npx netlify-cli *)",
+      "Bash(npm list *)",
+      "Read(//tmp/**)",
+      "Bash(curl -s http://localhost:5179/resume-site/)"
     ]
   }
 }

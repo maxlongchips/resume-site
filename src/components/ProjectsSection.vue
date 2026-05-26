@@ -176,7 +176,7 @@ const projects = computed(() =>
 }
 
 .project-idx {
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 42px;
   color: var(--accent);
   opacity: 0.3;

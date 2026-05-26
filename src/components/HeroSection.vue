@@ -67,7 +67,7 @@ onMounted(() => {
       <span>cat hero.md</span>
     </div>
 
-    <h1 class="hero-greeting font-[var(--font-serif)] text-[80px] font-normal leading-[1.05] tracking-[-0.05em] mb-2">
+    <h1 class="hero-greeting font-[var(--font-sans)] text-[80px] font-normal leading-[1.05] tracking-[-0.05em] mb-2">
       Hello<span class="italic text-[var(--accent)]">,</span>
     </h1>
 
@@ -84,7 +84,7 @@ onMounted(() => {
 
     <div class="hero-stats flex gap-15">
       <div v-for="stat in stats" :key="stat.label" class="stat relative">
-        <div class="font-[var(--font-serif)] text-[42px] font-normal text-[var(--accent)] leading-none mb-1.5">
+        <div class="font-[var(--font-sans)] text-[42px] font-normal text-[var(--accent)] leading-none mb-1.5">
           {{ stat.value }}
         </div>
         <div class="font-[var(--font-mono)] text-[12px] text-[var(--text-muted)] tracking-[0.15em] uppercase">

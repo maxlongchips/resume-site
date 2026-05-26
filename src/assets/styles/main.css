@@ -5,9 +5,11 @@
 @import "@fontsource/jetbrains-mono/300.css";
 @import "@fontsource/jetbrains-mono/400.css";
 @import "@fontsource/jetbrains-mono/500.css";
-@import "@fontsource/playfair-display/400.css";
-@import "@fontsource/playfair-display/400-italic.css";
-@import "@fontsource/playfair-display/700.css";
+
+@theme {
+  --font-sans: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+}
 
 :root {
   --bg: #1a1714;
@@ -25,9 +27,8 @@
   --accent-glow: rgba(232, 168, 73, 0.15);
   --accent-subtle: rgba(232, 168, 73, 0.06);
 
-  --font-sans: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
-  --font-serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
 }
 
 * {
@@ -138,6 +139,90 @@ body::before {
 
 [data-theme="cool-light"] .glow-orb {
   opacity: 0.3;
+}
+
+/* ===== Print: page setup ===== */
+@page {
+  size: A4;
+  margin: 0;
+}
+
+/* ===== Print: global reset ===== */
+@media print {
+  html, body, #app {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #1e293b !important;
+  }
+
+  body::before {
+    display: none !important;
+  }
+
+  /* Hide layout chrome */
+  .app-sidebar,
+  .app-header,
+  .editor-toolbar,
+  .block-toolbar {
+    display: none !important;
+  }
+
+  /* Let layout containers flow naturally */
+  .app-layout {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+
+  .app-main {
+    overflow: visible !important;
+    height: auto !important;
+    background: #ffffff !important;
+  }
+
+  .app-content {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* A4 paper: full width, no shadow, auto height for multi-page */
+  .a4-paper {
+    width: 100% !important;
+    min-height: auto !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 12mm 16mm !important;
+    background: #ffffff !important;
+    color: #1e293b !important;
+  }
+
+  /* Editor: hide interactive chrome */
+  .editor-shell {
+    background: #ffffff !important;
+    padding: 0 !important;
+    min-height: auto !important;
+  }
+
+  .a4-viewport {
+    padding: 0 !important;
+  }
+
+  .block-wrapper {
+    background: transparent !important;
+    border: none !important;
+  }
+
+  .rte-wrap .tiptap:hover {
+    background: transparent !important;
+  }
+
+  /* Force text colors for print */
+  .r-name, .f-name, .r-h2 { color: #0f172a !important; }
+  .r-divider, .r-footer-line { background: #e2e8f0 !important; }
 }
 
 /* Reduced motion */

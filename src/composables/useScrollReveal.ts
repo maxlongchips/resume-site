@@ -53,5 +53,6 @@ export function useScrollReveal(
 
   onUnmounted(() => {
     ctx?.revert()
+    ScrollTrigger.getAll().forEach(t => t.kill())
   })
 }
